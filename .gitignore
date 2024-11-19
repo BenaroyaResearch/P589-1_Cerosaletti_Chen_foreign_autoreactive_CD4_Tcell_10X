@@ -10,11 +10,13 @@
 *.tmp
 *.swp
 
-# Ignore output files
+# Ignore powerpoint presentations
+*.pptx
+
+# Ignore figures
 *.pdf
 *.png
-*.csv
 
 # Ignore directories
-data/
-output/
+data/output/
+figures/

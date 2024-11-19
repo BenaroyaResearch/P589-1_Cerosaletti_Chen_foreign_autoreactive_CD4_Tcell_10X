@@ -1,0 +1,355 @@
+---
+title: ""
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+setwd("~/Library/CloudStorage/Box-Box/P589-1_Cerosaletti_Chen_foreign_autoreactive_CD4_Tcell_10X")
+
+library(knitr)
+library(dplyr)
+library(ggplot2)
+library(GGally)
+theme_set(
+  theme_bw(20) +
+    theme(panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(colour = "black", fill = NA, size = 1),
+      axis.text = element_text(colour = "black"),
+      axis.ticks = element_line(colour = "black"),
+      legend.key = element_blank(),
+      strip.text.x = element_text(size = 14, margin = margin(b = 2, t = 2)),
+      strip.background = element_rect(fill = "white", colour = "black")))
+
+library(ggthemes)
+library(ggbeeswarm)
+library(viridis)
+library(stringr)
+library(readxl)
+library(kableExtra)
+library(RColorBrewer)
+library(plotly)
+library(tidyr)
+library(gtools)
+library(data.table)
+library(miscHelpers)
+# library(edgeR)
+library(ggrepel)
+library(ComplexHeatmap)
+library(egg) # For ggarrange
+library(ggpubr) # Also for ggarrange
+library(umap)
+library(igraph)
+library(forcats)
+library(Seurat)
+library(apird)
+library(randomcoloR)
+library(rcartocolor)
+library(paletteer)
+library(circlize)
+library(gridExtra)
+library(ggpointdensity)
+library(cowplot)
+
+opts_chunk$set(fig.width = 6, fig.height = 4.0, cache = TRUE, echo = FALSE, warning = FALSE, message = FALSE, cache.lazy = FALSE, results = "hide")
+opts_knit$set(root.dir = "~/Library/CloudStorage/Box-Box/P589-1_Cerosaletti_Chen_foreign_autoreactive_CD4_Tcell_10X")
+
+options(stringsAsFactors = FALSE)
+
+options(future.globals.maxSize = 1591289600)
+```
+
+```{r set_up_directories, cache = TRUE}
+
+baseDir <- "~/Library/CloudStorage/Box-Box/P589-1_Cerosaletti_Chen_foreign_autoreactive_CD4_Tcell_10X"
+dataDir <- file.path(baseDir, "data/input")
+outputDir <- file.path(baseDir, "data/output")
+plotDir <- file.path(baseDir, "figures_HD")
+tableDir <- file.path(baseDir, "data/output")
+dataDate <- "2024-08-25"
+filenameSuffix <- paste0("P589-1_autoreactive_CD4_Tcell_10X.", dataDate)
+```
+
+```{r load_tcrs_and_seurat_obj}
+
+seuratQCMergedCleanedDS <- readRDS(file.path(dataDir, "seuratQCMergedCleanedDS_HD.RDS"))
+
+# load the data
+tcrsPool1.df <-
+  read.csv(file.path(dataDir, "filtered_contig_annotations_pool1.csv")) %>%
+  data.frame() %>%
+  dplyr::mutate(barcode = paste0("1_", barcode))
+
+
+tcrsPool2.df <-
+  read.csv(file.path(dataDir, "filtered_contig_annotations_pool2.csv")) %>%
+  data.frame()%>%
+  dplyr::mutate(barcode = paste0("2_", barcode))
+
+# merge the two pools
+tcrs.df <- rbind(tcrsPool1.df, tcrsPool2.df)
+```
+
+```{r clean_tcrs_and_seurat}
+
+# Remove cells with: a) 3+ betas or alphas and, b) cells with 2 alphas and 2 betas
+# Remove iNKT and MAIT cells
+
+callMultiplets <- function(tcrs,
+                      nAlphaCut = 3,
+                      nBetaCut = 3,
+                      alphaAndBetaCut = 2,
+                      callINKT = TRUE,
+                      callMAIT = TRUE){
+  #Count chains
+  
+  chainCounts <- tcrs %>%
+    dplyr::group_by(barcode) %>%
+    dplyr::summarise(nAlpha = sum(chain ==  "TRA"),
+                     nBeta = sum(chain == "TRB"))
+  
+  multiplets <- chainCounts %>%
+    dplyr::filter(nAlpha > nAlphaCut |
+                  nBeta > nBetaCut |
+                    (nAlpha >= alphaAndBetaCut & nBeta >= alphaAndBetaCut))
+  
+  tcrs$multiplet <- tcrs$barcode %in% multiplets$barcode
+  
+  if(callMAIT == TRUE){
+    
+    tcrs <- tcrs %>%
+      dplyr::mutate(isMAIT= (str_detect(v_gene, "TRAV1-2") &
+                      str_detect(j_gene, "TRAJ(33|12|20)")))
+    
+  }
+  
+  if(callINKT == TRUE){
+    
+    tcrs <- tcrs %>%
+      dplyr::mutate(isINKT = (str_detect(v_gene, "TRAV10") &
+                        str_detect(j_gene, "TRAJ18")))
+  }
+  
+  return(tcrs)
+}
+
+```
+
+
+```{r call_clones}
+
+#From a list of TCRs, call clones 
+
+callClones <- function(tcrs, 
+                       cloneOption = "",
+                       cloneColumnName = "CloneID"){
+  
+  possibleCloneOptions <- c("CDR3",
+                            "VJandCDR3",
+                            "CDR3nt")
+  
+  if (is.null(cloneOption) || length(cloneOption) != 1L || !cloneOption %in% possibleCloneOptions) {
+    stop("'cloneOption' argument must be one of: 'CDR3','VJandCDR3', 'CDR3nt'")
+  }
+  
+  if(cloneOption == "CDR3") {
+    tcrs$cloneKey = tcrs$cdr3
+  }
+  
+  if(cloneOption == "VJandCDR3") {
+    tcrs$cloneKey = paste(tcrs$v_gene, tcrs$cdr3, tcrs$j_gene,sep = "_")
+  }
+  
+  if(cloneOption == "CDR3nt"){
+    tcrs$cloneKey = tcrs$cdr3_nt
+  }
+  
+  cloneLookup <- tcrs %>%
+  dplyr::group_by(barcode, chain) %>%
+  dplyr::summarise(key = list(sort(unique(cloneKey)))) %>%
+  pivot_wider(names_from = "chain",
+    values_from = "key")
+  
+  cloneDictionary <- cloneLookup %>%
+  dplyr::ungroup() %>%
+  dplyr::select(-one_of(c("barcode"))) %>%
+  unique()
+
+# Assign each row a clone ID
+cloneDictionary$cloneID <- paste0("Clone", "_", 1:nrow(cloneDictionary))
+  
+  # Merge the clone IDs back into the dataframe where each cell(lib is a row)
+cloneLookup <- merge(cloneLookup, cloneDictionary)
+
+# Propagate the narrow clone definition back up to the tcrs data frame
+tcrs[,cloneColumnName] <- cloneLookup$cloneID[match(tcrs$barcode,
+  cloneLookup$barcode)]
+
+tcrs$cloneKey <- NULL
+
+return(tcrs)
+
+  
+}
+
+```
+
+```{r clean_and_call_clones}
+
+tcrs.df <- callMultiplets(tcrs.df)
+
+cleanTCRs <- tcrs.df %>%
+  dplyr::filter(!multiplet) %>%
+  dplyr::filter(!isMAIT) %>%
+  dplyr::filter(!isINKT) 
+
+barcodesToFilter <- tcrs.df$barcode[which(tcrs.df$multiplet |
+                                          tcrs.df$isMAIT |
+                                          tcrs.df$isINKT)]
+
+cleanSeurat <- subset(seuratQCMergedCleanedDS, cells = barcodesToFilter, invert = TRUE)
+
+cleanTCRs <- callClones(cleanTCRs,
+                        cloneOption = "CDR3",
+                        cloneColumnName = "cdr3CloneID")
+
+cleanTCRs <- callClones(cleanTCRs,
+                        cloneOption = "VJandCDR3",
+                        cloneColumnName = "threePointCloneID")
+```
+
+
+```{r add_clone_info_to_seurat_object}
+
+cellLevelTCRInfo <- cleanTCRs %>%
+  dplyr::group_by(barcode) %>%
+  dplyr::summarise(nAlpha = sum(str_detect(chain, "TRA")),
+                   nBeta = sum(str_detect(chain, "TRB")),
+                   cdr3CloneID = unique(cdr3CloneID),
+                   threePointCloneID = unique(threePointCloneID)) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(cdr3CloneID) %>%
+  dplyr::mutate(cdr3CloneCount = n()) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(threePointCloneID) %>%
+  dplyr::mutate(threePointCloneCount = n()) %>%
+  as.data.frame()
+
+rownames(cellLevelTCRInfo) <- cellLevelTCRInfo$barcode
+  
+
+cleanSeurat <- AddMetaData(object = cleanSeurat,
+                                       metadata = cellLevelTCRInfo)
+
+```
+
+```{r make_airline_plot}
+
+airlinePlot <- function(seuratObj, 
+                        cloneIDColumn, 
+                        cloneIDs,
+                        arcLinewidth = 0.1,
+                        arcAlpha = 0.5,
+                        savePlot = FALSE,
+                        plotName = "AirlinePlot"){
+  
+  DefaultAssay(seuratObj) <- "RNA"
+  
+  #Make sure a umap project exits
+  
+   if (is.null(seuratObj@reductions$umap)) {
+    stop("UMAP must first be run on the Seurat object")
+  }
+  
+  #Make sure the clone ID column exists
+  if (! (cloneIDColumn %in% colnames(seuratObj@meta.data))) {
+    stop("Check that the clone ID column exists in the metadata")
+  }
+  
+  
+  
+  #Link umap coordinates to cloneIDs
+  umapDF <- data.frame(cloneID = seuratObj@meta.data[,cloneIDColumn],
+                       umap1 = seuratObj@reductions$umap@cell.embeddings[,1],
+                       umap2 = seuratObj@reductions$umap@cell.embeddings[,2])
+  
+  #Filter the umapDF to only include the cloneIDs of interest
+  umapDF <- umapDF %>%
+    dplyr::filter(cloneID %in% cloneIDs)
+
+  # create data frame to store links 
+curves.tmp <-
+  data.frame(
+    cloneID = character(),
+    x = numeric(),
+    y = numeric(),
+    xend = numeric(),
+    yend = numeric())
+
+# loop over each clone, and extract coordinates for cells from the same clone
+for (clone_id.tmp in na.omit(unique(umapDF$cloneID))) {
+  clone_id_curves.tmp <- curves.tmp[0,]
+  data_for_curves.tmp <-
+    umapDF %>%
+    dplyr::filter(cloneID %in% clone_id.tmp)
+    for (i in 1:(nrow(data_for_curves.tmp)-1)) {
+      for (j in (i+1):nrow(data_for_curves.tmp)) {
+        clone_id_curves.tmp <-
+          rbind(
+            clone_id_curves.tmp,
+            list(
+              cloneID =
+                data_for_curves.tmp$cloneID[i],
+              x = data_for_curves.tmp$umap1[i],
+              y = data_for_curves.tmp$umap2[i],
+              xend = data_for_curves.tmp$umap1[j],
+              yend = data_for_curves.tmp$umap2[j]))
+      }
+    }
+  curves.tmp <-
+    rbind(curves.tmp, clone_id_curves.tmp)
+}
+
+gPlot <- DimPlot(object = seuratObj, reduction = "umap", group.by = "seurat_clusters") +
+  labs(title = "") +
+  labs(x = "UMAP 1", y ="UMAP 2") +
+  geom_curve(
+    data = curves.tmp,
+    mapping = aes(x=x, y=y, xend=xend, yend=yend),
+    linewidth = arcLinewidth,
+    alpha= arcAlpha)  +
+  theme(aspect.ratio = 1)
+
+if(savePlot == TRUE){
+  
+  png(file = file.path(plotDir, paste0(plotName,".png")),
+      width = 600,
+      height = 400)
+  
+  print(gPlot)
+  
+  invisible(dev.off())
+}
+
+  return(gPlot)
+}
+
+```
+
+```{r make_plot}
+
+airlinePlot(cleanSeurat,
+            cloneIDColumn = "cdr3CloneID", 
+            cloneIDs = c("Clone_395"),
+            savePlot = TRUE, 
+            plotName = "AirlinePlot") 
+
+```
+

@@ -1,0 +1,20 @@
+# Ignore R data files
+*.RData
+*.rds
+
+# Ignore R history files
+.Rhistory
+.Rapp.history
+
+# Ignore temporary files
+*.tmp
+*.swp
+
+# Ignore output files
+*.pdf
+*.png
+*.csv
+
+# Ignore directories
+data/
+output/

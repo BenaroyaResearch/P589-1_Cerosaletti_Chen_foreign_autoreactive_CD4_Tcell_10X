@@ -1,5 +1,6 @@
 # Ignore MacOS files
 .DS_Store
+~$*
 
 # Ignore R data files
 *.RData
@@ -23,4 +24,4 @@
 # Ignore directories
 data/output/
 figures/
-.DS_Store
+documents/notes/

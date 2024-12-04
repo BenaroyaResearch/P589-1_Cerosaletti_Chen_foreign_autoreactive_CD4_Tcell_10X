@@ -32,6 +32,7 @@ theme_set(
 library(ggthemes)
 library(ggforce)
 library(ggbeeswarm)
+library(ggvenn)
 library(viridis)
 library(stringr)
 library(readxl)
@@ -79,7 +80,7 @@ baseDir <- "/Users/tedwards/Documents/projects/P589-1_Cerosaletti_Chen_foreign_a
 dataDir <- file.path(baseDir, "data/input")
 plotDir <- file.path(baseDir, "figures")
 tableDir <- file.path(baseDir, "data/output")
-dataDate <- "2024-11-15"
+dataDate <- "2024-11-26"
 filenameSuffix <- paste0("P589-1_autoreactive_CD4_Tcell_10X.", dataDate)
 
 P589_1Samples <- c("pool589-1_1",
@@ -658,6 +659,12 @@ palDonorId <- setNames(colors, unique_donor_ids)
 
 # create stimulation color palette
 palStimulation <- setNames(paletteer::paletteer_d("khroma::highcontrast", n = 3), c("Polyclonal", "IAR", "Microbial"))
+
+# create cellType (TotalSeq) color palette
+palCellType <- c("Treg" = "blue", "Tconv" = "red", "Other" = "gray")
+
+# create studyGroup color palette
+palStudyGroup <- c("Control" = "lightblue", "T1D" = "orange")
 ```
 
 ```{r make_qc_cuts, results = "show"}
@@ -1282,7 +1289,6 @@ invisible(dev.off())
 seuratQCMerged <- subset(seuratQCMerged, cells = barcodesToFilter, invert = TRUE)
 
 # add_clone_info_to_seurat_object
-
 cellLevelTCRInfo <- cleanTCRs.df %>%
   dplyr::group_by(barcode) %>%
   dplyr::summarise(nAlpha = sum(str_detect(chain, "TRA")),
@@ -1298,7 +1304,6 @@ cellLevelTCRInfo <- cleanTCRs.df %>%
   as.data.frame()
 
 rownames(cellLevelTCRInfo) <- cellLevelTCRInfo$barcode
-
 
 seuratQCMerged <- AddMetaData(object = seuratQCMerged,
   metadata = cellLevelTCRInfo)
@@ -1683,8 +1688,6 @@ rm_tmp(ask = FALSE)
 seuratQCMergedCleaned <- FindNeighbors(seuratQCMergedCleaned, dims = 1:10)
 seuratQCMergedCleaned <- FindClusters(seuratQCMergedCleaned, resolution = 0.4)
 
-
-
 set.seed(6022)
 seuratQCMergedCleaned <- RunUMAP(object = seuratQCMergedCleaned, reduction = "pca",
   dims = 1:10,
@@ -1936,12 +1939,28 @@ seuratQCMergedCleaned <- AddMetaData(
   col.name = "cellTypistCalling"
 )
 
+# Replace NA values in cellTypistCalling column with "Other"
+seuratQCMergedCleaned$cellTypistCalling[is.na(seuratQCMergedCleaned$cellTypistCalling)] <- "Other"
+
+# create $cellTypistSimplified where "Treg" stays the same, "Memory CD4 T cell" becomes "Tconv", and all other cells are "Other"
+seuratQCMergedCleaned@meta.data$cellTypistSimplified <- ifelse(
+  seuratQCMergedCleaned@meta.data$cellTypistCalling == "Treg",
+  "Treg",
+  ifelse(seuratQCMergedCleaned@meta.data$cellTypistCalling == "Memory CD4 T cell",
+    "Tconv",
+    "Other")
+)
+
 # make a color palette for these cell types
 # Define the cell types including NA
-cell_types.tmp <- c("Memory CD4 T cell", "cDC1", "Memory CD8 T cell", "Treg", NA)
+cell_types.tmp <- c("Memory CD4 T cell", "cDC1", "Memory CD8 T cell", "Treg", "Other")
 
 # Generate the color palette
 palCellTypist <- paletteer::paletteer_d("fishualize::Centropyge_loricula", n = length(cell_types.tmp))
+palCellTypist[1] <- "#FF0000" # to match palCellType
+palCellTypist[4] <- "#0000FF" # to match palCellType
+palCellTypist[5] <- "#808080" # to match palCellType
+
 #
 # Create a named vector of colors
 names(palCellTypist) <- cell_types.tmp
@@ -2884,8 +2903,6 @@ print(elbowPlot.tmp)
 dev.off()
 rm_tmp(ask = FALSE)
 
-
-
 # let's do some hyperparameter optimization
 # create grid of hyperparameters to test
 hyperParamGrid.df <- expand.grid(
@@ -2971,14 +2988,14 @@ hyperParamGrid.df$nClusters <- clusteringMetrics[, "nClusters"]
 parallel::stopCluster(cl = myCluster)
 
 # scale the clustering metrics to fall between 0 and 1
-hyperParamGrid.df$DBIndex <- (hyperParamGrid.df$DBIndex - min(hyperParamGrid.df$DBIndex, na.rm = T)) /
-  (max(hyperParamGrid.df$DBIndex, na.rm = T) - min(hyperParamGrid.df$DBIndex, na.rm = T))
+hyperParamGrid.df$DBIndex <- (hyperParamGrid.df$DBIndex - min(hyperParamGrid.df$DBIndex, na.rm = TRUE)) /
+  (max(hyperParamGrid.df$DBIndex, na.rm = TRUE) - min(hyperParamGrid.df$DBIndex, na.rm = TRUE))
 
-hyperParamGrid.df$CHMetric <- (hyperParamGrid.df$CHMetric - min(hyperParamGrid.df$CHMetric, na.rm = T)) /
-  (max(hyperParamGrid.df$CHMetric, na.rm = T) - min(hyperParamGrid.df$CHMetric, na.rm = T))
+hyperParamGrid.df$CHMetric <- (hyperParamGrid.df$CHMetric - min(hyperParamGrid.df$CHMetric, na.rm = TRUE)) /
+  (max(hyperParamGrid.df$CHMetric, na.rm = TRUE) - min(hyperParamGrid.df$CHMetric, na.rm = TRUE))
 
-hyperParamGrid.df$medianSilScore <- (hyperParamGrid.df$medianSilScore - min(hyperParamGrid.df$medianSilScore, na.rm = T)) /
-  (max(hyperParamGrid.df$medianSilScore, na.rm = T) - min(hyperParamGrid.df$medianSilScore, na.rm = T))
+hyperParamGrid.df$medianSilScore <- (hyperParamGrid.df$medianSilScore - min(hyperParamGrid.df$medianSilScore, na.rm = TRUE)) /
+  (max(hyperParamGrid.df$medianSilScore, na.rm = TRUE) - min(hyperParamGrid.df$medianSilScore, na.rm = TRUE))
 
 # make an inverse DB score so that it is more easily compared to the other two metrics
 # (small DB is best, but large CH and silscore are best)
@@ -2993,12 +3010,19 @@ hyperParamGrid.df <- hyperParamGrid.df %>%
 
 write.xlsx(hyperParamGrid.df, file = file.path(tableDir, "20242017_RNA_clustering_hyperParamGrid.xlsx"))
 
+# create a subset of hyperParamGrid.df with the best option for each nClusters
+hyperParamGridOptSubset.df <- hyperParamGrid.df %>%
+  group_by(nClusters) %>%
+  filter(meanEvalMetric == max(meanEvalMetric)) %>%
+  ungroup()
+
 set.seed(6022)
 seuratQCMergedCleanedDS <- FindNeighbors(seuratQCMergedCleanedDS, dims = 1:14) # 14
 seuratQCMergedCleanedDS <- FindClusters(seuratQCMergedCleanedDS, resolution = 0.25) # 0.4)
 
 set.seed(6022)
 seuratQCMergedCleanedDS <- RunUMAP(object = seuratQCMergedCleanedDS, reduction = "pca",
+  reduction.key = "test_",
   dims = 1:14,
   n.neighbors = 5, # 30
   min.dist = 0.6) # 0.1
@@ -3044,6 +3068,249 @@ palRNAClusters <- paletteer_d("khroma::okabeitoblack", n = num_clusters) %>%
   sample() %>%  # Shuffle colors
   .[!grepl("yellow|black", .)] %>%  # Drop yellow and black colors
   setNames(sort(unique(seuratQCMergedCleanedDS@meta.data[[clusterName[["RNA"]]]])))
+```
+
+```{r optRNAseqClusteringFunctionDraft}
+# Re-run normalization, clustering, UMAP, etc on this subset
+DefaultAssay(seuratQCMergedCleanedDS) <- "RNA"
+seuratQCMergedCleanedDS <- JoinLayers(seuratQCMergedCleanedDS, layers = c("RNA"))
+seuratQCMergedCleanedDS <- NormalizeData(object = seuratQCMergedCleanedDS,
+  verbose = FALSE,
+  normalization.method = "LogNormalize",
+  margin = 2,
+  assay = "FB")
+
+seuratQCMergedCleanedDS <- NormalizeData(object = seuratQCMergedCleanedDS,
+  verbose = FALSE,
+  normalization.method = "LogNormalize",
+  margin = 2,
+  assay = "HT")
+
+seuratQCMergedCleanedDS <- FindVariableFeatures(object = seuratQCMergedCleanedDS,
+  selection.method = "vst", nfeatures = 2000, verbose = FALSE)
+
+seuratQCMergedCleanedDS <- ScaleData(object = seuratQCMergedCleanedDS, verbose = FALSE)
+seuratQCMergedCleanedDS <- RunPCA(object = seuratQCMergedCleanedDS, npcs = 30, verbose = FALSE)
+
+# Elbow plot
+elbowPlot.tmp <- ElbowPlot(seuratQCMergedCleanedDS, reduction = "pca")
+
+pdf(file.path(plotDir,
+  paste0(filenameSuffix, "_elbowPlotUMAP.pdf")),
+height = 5,
+width = 6)
+
+print(elbowPlot.tmp)
+
+dev.off()
+rm_tmp(ask = FALSE)
+
+# let's do some hyperparameter optimization
+# create grid of hyperparameters to test
+hyperParamGridPCA.df <- expand.grid(
+  findNeighborsDim = c(5, 7, 14, 16, 18, 20),
+  findClustersRes = c(0.01, 0.025, 0.05, 0.75, 0.1, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.8, 1, 1.3, 1.5, 2, 2.5)
+)
+
+min.dist <- c(0.001, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1)
+n_neighbors <- c(5, 20, 30, 40, 50)
+hyperParamUMAP.list <- list(min.dist = min.dist, n_neighbors = n_neighbors)
+
+optimizeRNAseqClustering <- function(seuratObject, hyperParamGridPCA.df, hyperParamUMAP.list) {
+  # hyperParamGridPCA.df is an expanded grid for a full grid search for PCA clustering. type: dataframe
+  # hyperParamGridUMAP.list is a list (of lists) of UMAP hyperparameters. type: list
+
+  # detect nuymber of cores, leave one available for the machine to do other things
+  nCores <- parallel::detectCores() - 1
+
+  # create the cluster
+  myCluster <- parallel::makeCluster(
+    nCores,
+    type = "FORK"
+  )
+
+  # register it to be used by %dopar%
+  doParallel::registerDoParallel(cl = myCluster)
+
+  # Hyperparameter grid search
+  clusteringMetrics <- foreach(
+    findNeighborsDim = hyperParamGridPCA.df$findNeighborsDim,
+    findClustersRes = hyperParamGridPCA.df$findClustersRes,
+    .combine = "cbind"
+  ) %dopar% {
+    # do the UMAP clustering on the Seurat object
+    set.seed(6022)
+    seuratObject <- FindNeighbors(seuratObject, dims = 1:findNeighborsDim, verbose = FALSE)
+    seuratObject <- FindClusters(seuratObject, resolution = findClustersRes, verbose = FALSE)
+
+    # extract the cluster information
+    metaData.df <- seuratObject@meta.data
+
+    # Extract PCA embeddings
+    pca_embeddings <- seuratObject@reductions$pca@cell.embeddings
+
+    clusterMat <- pca_embeddings
+    clusterVect <- as.numeric(metaData.df$seurat_clusters)
+    nClusters <- dim(table(metaData.df$seurat_clusters))
+
+    # calculate clustering metrics
+    daviesBouldinIdx <- index.DB(clusterMat, clusterVect)
+    calinskiHarabasz <- index.G1(clusterMat, clusterVect)
+    silScore <- silhouette(clusterVect, dist(clusterMat))
+    if (anyNA(silScore)) { # this is gross and clumsy, but hey, we'll fix it later
+      medianSilScore <- NaN
+    } else {
+      silScoreSummary <- summary(silScore)
+      medianSilScore <- silScoreSummary$si.summary["Median"]
+    }
+
+    clusteringMetrics <- c("nClusters" = nClusters,
+      "DBIndex" = daviesBouldinIdx$DB,
+      "CHMetric" = calinskiHarabasz,
+      "medianSilScore" = medianSilScore)
+    return(clusteringMetrics)
+  }
+
+  # transpose the result
+  clusteringMetrics <- t(clusteringMetrics)
+
+  # adding the prediction error column
+  hyperParamGrid.df$DBIndex <- clusteringMetrics[, "DBIndex"]
+  hyperParamGrid.df$CHMetric <- clusteringMetrics[, "CHMetric"]
+  hyperParamGrid.df$medianSilScore <- clusteringMetrics[, "medianSilScore"]
+  hyperParamGrid.df$nClusters <- clusteringMetrics[, "nClusters"]
+
+  # stop cluster after we're done
+  parallel::stopCluster(cl = myCluster)
+
+  # scale the clustering metrics to fall between 0 and 1
+  hyperParamGrid.df$DBIndex <- (hyperParamGrid.df$DBIndex - min(hyperParamGrid.df$DBIndex, na.rm = TRUE)) /
+    (max(hyperParamGrid.df$DBIndex, na.rm = TRUE) - min(hyperParamGrid.df$DBIndex, na.rm = TRUE))
+
+  hyperParamGrid.df$CHMetric <- (hyperParamGrid.df$CHMetric - min(hyperParamGrid.df$CHMetric, na.rm = TRUE)) /
+    (max(hyperParamGrid.df$CHMetric, na.rm = TRUE) - min(hyperParamGrid.df$CHMetric, na.rm = TRUE))
+
+  hyperParamGrid.df$medianSilScore <- (hyperParamGrid.df$medianSilScore - min(hyperParamGrid.df$medianSilScore, na.rm = TRUE)) /
+    (max(hyperParamGrid.df$medianSilScore, na.rm = TRUE) - min(hyperParamGrid.df$medianSilScore, na.rm = TRUE))
+
+  # make an inverse DB score so that it is more easily compared to the other two metrics
+  # (small DB is best, but large CH and silscore are best)
+  hyperParamGrid.df$DBIndexInverse <- 1 - hyperParamGrid.df$DBIndex
+
+  # create hyperParamGrid.df$meanEvalMetric, as the mean of $DBIndex, $CHMetric, $medianSilScore
+  hyperParamGrid.df$meanEvalMetric <- rowMeans(hyperParamGrid.df[, c("DBIndexInverse", "CHMetric", "medianSilScore")], na.rm = TRUE)
+
+  # sort and export the hyperparamgrid
+  hyperParamGrid.df <- hyperParamGrid.df %>%
+    arrange(nClusters, desc(meanEvalMetric))
+
+  write.xlsx(hyperParamGrid.df, file = file.path(tableDir, "20242017_RNA_clustering_hyperParamGrid.xlsx"))
+
+  # create a subset of hyperParamGrid.df with the best option for each nClusters
+  hyperParamGridOptSubset.df <- hyperParamGrid.df %>%
+    group_by(nClusters) %>%
+    filter(meanEvalMetric == max(meanEvalMetric)) %>%
+    ungroup()
+
+  # ---------------------------start of scDEED UMAP opt---------------------------------------
+
+  # use scDEED to optimize the UMAP hyperparameters
+  K_ <- 14 # 14 # number of PCs
+
+  scDEEDResult <- scDEED(seuratObject, # input Seurat object (must have UMAP or t-SNE already run)
+    K = K_, # number of PCs
+    reduction.method = "umap", # 'umap' or 'tsne'
+    min.dist =  0.6, # c(0.001, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1), # 0.4, # scDEED default is 0.1 & 0.4; Seurat default is 0.3
+    n_neighbors = 5, # c(5, 20, 30, 40, 50), # 5, # c(5, 20, 30, 40, 50), #scDEED defaults. Seurat default is 30.
+    similarity_percent = 0.5, # default
+    dubious_cutoff = 0.05, # default
+    trustworthy_cutoff = 0.95) # default
+
+  # add $number_trustworthy_cells and $number_intermediate_cells to scDEEDResult
+  scDEEDResult$full_results$number_trustworthy_cells <- str_count(scDEEDResult$full_results$trustworthy_cells, ",") + 1
+  scDEEDResult$full_results$number_intermediate_cells <- str_count(scDEEDResult$full_results$intermediate_cells, ",") + 1
+
+  # utilizing scDEED output
+  min(scDEEDResult$num_dubious$number_dubious_cells) # 437 # 26 with opt
+  opt <- which(scDEEDResult$num_dubious$number_dubious_cells == min(scDEEDResult$num_dubious$number_dubious_cells))
+  m <- scDEEDResult$num_dubious$min.dist[opt] # 0.1 # 0.3 #0.5
+  n <- scDEEDResult$num_dubious$n_neighbors[opt] # 30 (only value tested) # 5 #5
+
+  dubious_cells <- scDEEDResult$full_results$dubious_cells[opt]
+  dubious_cells <- as.numeric(strsplit(dubious_cells, ",")[[1]])
+  trustworthy_cells <- scDEEDResult$full_results$trustworthy_cells[opt]
+  trustworthy_cells <- as.numeric(strsplit(trustworthy_cells, ",")[[1]])
+  set.seed(6022)
+  seuratObject <- RunUMAP(seuratObject,
+    dims = 1:K_,
+    min.dist = m,
+    n.neighbors = n)
+  # seed.use = 100)
+
+  # match up the dubious/trustworthy lists with the seurat data
+  rownames_seurat <- rownames(seuratObject@meta.data)
+  rownames_dubious <- rownames_seurat[dubious_cells]
+  rownames_trustworthy <- rownames_seurat[trustworthy_cells]
+
+  designation <- rep("intermediate", length(rownames_seurat))
+
+  designation[rownames_seurat %in% rownames_dubious] <- "dubious"
+  designation[rownames_seurat %in% rownames_trustworthy] <- "trustworthy"
+
+  seuratObject@meta.data$designation <- designation
+
+  #-------------------------------end of scDEED UMAP opt--------------------------------------------------------
+
+  set.seed(6022)
+  seuratObject <- FindNeighbors(seuratObject, dims = 1:14) # 14
+  seuratObject <- FindClusters(seuratObject, resolution = 0.25) # 0.4)
+
+  set.seed(6022)
+  seuratObject <- RunUMAP(object = seuratObject, reduction = "pca",
+    reduction.key = "test_",
+    dims = 1:14,
+    n.neighbors = 5, # 30
+    min.dist = 0.6) # 0.1
+
+  # store cluster info in seurat object metadata
+  # Initialize clusterName and clusterMarkers
+  clusterName <- character()
+  clusterMarkers <- list()
+
+  # Create the cluster name for RNA
+  clusterName[["RNA"]] <- paste0("seurat_clusters_RNA_", str_replace(clusterResolution[["RNA"]], "\\.", "p"))
+
+  # Add metadata to the Seurat object
+  seuratObject <- seuratObject %>%
+    AddMetaData(Idents(seuratObject), col.name = clusterName[["RNA"]])
+
+  # Set the identifiers
+  Idents(seuratObject) <- seuratObject@meta.data[[clusterName[["RNA"]]]]
+
+  # Ensure data layers are joined
+  seuratObject <- JoinLayers(seuratObject)
+
+  # Perform the FindAllMarkers function and store the results in clusterMarkers
+  clusterMarkers[[paste0("RNA_", clusterName[["RNA"]])]] <-
+    FindAllMarkers(seuratObject, assay = "RNA")
+
+  palRNAClusters <-
+    big_colorblind_pal(
+      n_distinct(seuratObject@meta.data[[clusterName[["RNA"]]]]),
+      shuffle_colors = TRUE,
+      drop_yellow = TRUE, drop_black = TRUE) %>%
+    setNames(sort(unique(seuratObject@meta.data[[clusterName[["RNA"]]]])))
+
+  # Get the number of distinct RNA clusters
+  num_clusters <- n_distinct(seuratObject@meta.data[[clusterName[["RNA"]]]])
+
+  # Get the "ggsci::uniform_startrek" palette and adjust it
+  palRNAClusters <- paletteer_d("khroma::okabeitoblack", n = num_clusters) %>%
+    sample() %>%  # Shuffle colors
+    .[!grepl("yellow|black", .)] %>%  # Drop yellow and black colors
+    setNames(sort(unique(seuratObject@meta.data[[clusterName[["RNA"]]]])))
+
+}
 ```
 
 ```{r hierarchicalClusteringAnalysis}
@@ -3143,8 +3410,7 @@ seuratQCMergedCleanedDSInteg <- IntegrateLayers(
 ```
 
 ```{r scDEED}
-library(scDEED)
-# try out scDEED
+# use scDEED to optimize the UMAP hyperparameters
 K_ <- 14 # 14 # number of PCs
 
 start_time.tmp <- Sys.time()
@@ -4074,7 +4340,7 @@ rm_tmp(ask = FALSE)
 ```
 
 ```{r defineGeneOfInterestPlotFunction}
-plotGenesOfInterest  <- function(seuratObject, geneList, fileName, nCols = 2) {
+plotGenesOfInterest <- function(seuratObject, geneList, fileName, nCols = 2) {
   pdf(
     file =
       file.path(
@@ -4206,6 +4472,118 @@ dev.off()
 rm_tmp(ask = FALSE)
 ```
 
+```{r meanExpressionTregHistogram}
+# generate a histogram of meanExpressionTreg
+
+# Calculate the mean expression of the genes in genesOfInterestTreg for all cells
+seuratQCMergedCleaned$meanExpressionTreg <- rowMeans(
+  FetchData(seuratQCMergedCleaned, vars = genesOfInterestTreg)
+)
+
+# Calculate the 75th percentile of meanExpressionTreg
+percentile_75_Treg <- quantile(seuratQCMergedCleaned$meanExpressionTreg, 0.75, na.rm = TRUE)
+
+# Generate a histogram of meanExpressionTreg with a vertical line at the 75th percentile
+histogramPlot.tmp <- ggplot(data.frame(meanExpressionTreg = seuratQCMergedCleaned$meanExpressionTreg), aes(x = meanExpressionTreg)) +
+  geom_histogram(binwidth = 0.05, fill = "blue", color = "black", alpha = 0.7) +
+  geom_vline(aes(xintercept = percentile_75_Tconv), color = "red", linetype = "dashed", size = 1) +
+  labs(title = "Histogram of meanExpressionTreg",
+    x = "Mean Expression Treg",
+    y = "Frequency") +
+  theme_minimal()
+
+# Start PDF printing
+pdf(file.path(plotDir, paste0(filenameSuffix, "meanExpressionTreg_Histogram.pdf")),
+  height = 5,
+  width = 7)
+
+# Print the histogram
+print(histogramPlot.tmp)
+
+# Close the PDF device
+dev.off()
+
+# rm_tmp(ask = FALSE)
+```
+
+```{r meanExpressionTconvHistogram}
+# generate a histogram of meanExpressionTreg
+
+# Calculate the mean expression of the genes in genesOfInterestTreg for all cells
+seuratQCMergedCleaned$meanExpressionTconv <- rowMeans(
+  FetchData(seuratQCMergedCleaned, vars = genesOfInterestTconv)
+)
+
+# Calculate the 75th percentile of meanExpressionTconv
+percentile_75_Tconv <- quantile(seuratQCMergedCleaned$meanExpressionTconv, 0.75, na.rm = TRUE)
+
+# Generate a histogram of meanExpressionTconv with a vertical line at the 75th percentile
+histogramPlot.tmp <- ggplot(data.frame(meanExpressionTconv = seuratQCMergedCleaned$meanExpressionTconv), aes(x = meanExpressionTconv)) +
+  geom_histogram(binwidth = 0.05, fill = "blue", color = "black", alpha = 0.7) +
+  geom_vline(aes(xintercept = percentile_75_Tconv), color = "red", linetype = "dashed", size = 1) +
+  labs(title = "Histogram of meanExpressionTconv",
+    x = "Mean Expression Tconv",
+    y = "Frequency") +
+  theme_minimal()
+
+# Start PDF printing
+pdf(file.path(plotDir, paste0(filenameSuffix, "meanExpressionTconv_Histogram.pdf")),
+  height = 5,
+  width = 7)
+
+# Print the histogram
+print(histogramPlot.tmp)
+
+# Close the PDF device
+dev.off()
+
+# rm_tmp(ask = FALSE)
+```
+
+```{r addP390ModuleCallingToSeurat}
+# Calculate the mean expression of the genes in genesOfInterestTreg for all cells
+seuratQCMergedCleaned$meanExpressionTreg <- rowMeans(
+  FetchData(seuratQCMergedCleaned, vars = genesOfInterestTreg)
+)
+
+seuratQCMergedCleanedDS$meanExpressionTreg <- rowMeans(
+  FetchData(seuratQCMergedCleaned, vars = genesOfInterestTreg)
+)
+
+# Calculate the mean expression of the genes in genesOfInterestTconv for all cells
+seuratQCMergedCleaned$meanExpressionTconv <- rowMeans(
+  FetchData(seuratQCMergedCleaned, vars = genesOfInterestTconv)
+)
+
+seuratQCMergedCleanedDS$meanExpressionTconv <- rowMeans(
+  FetchData(seuratQCMergedCleaned, vars = genesOfInterestTconv)
+)
+
+# Calculate the 75th percentiles
+percentile_75_Treg <- quantile(seuratQCMergedCleaned$meanExpressionTreg, 0.50, na.rm = TRUE)
+percentile_75_Tconv <- quantile(seuratQCMergedCleaned$meanExpressionTconv, 0.50, na.rm = TRUE)
+
+# Add a new column for cell type based on the specified conditions
+seuratQCMergedCleaned$cellTypeP390 <- "Other"
+seuratQCMergedCleaned$cellTypeP390[seuratQCMergedCleaned$meanExpressionTreg > percentile_75_Treg & seuratQCMergedCleaned$meanExpressionTconv > percentile_75_Tconv] <- "Both"
+seuratQCMergedCleaned$cellTypeP390[seuratQCMergedCleaned$meanExpressionTreg > percentile_75_Treg & seuratQCMergedCleaned$meanExpressionTconv <= percentile_75_Tconv] <- "Treg"
+seuratQCMergedCleaned$cellTypeP390[seuratQCMergedCleaned$meanExpressionTreg <= percentile_75_Treg & seuratQCMergedCleaned$meanExpressionTconv > percentile_75_Tconv] <- "Tconv"
+
+# Verify the new column
+table(seuratQCMergedCleaned$cellTypeP390)
+
+
+# Calculate the mean expression of the genes in genesOfInterestTreg for downsampled object (TODO, move this all above downsampling)
+
+# Add a new column for cell type based on the specified conditions
+seuratQCMergedCleanedDS$cellTypeP390 <- "Other"
+seuratQCMergedCleanedDS$cellTypeP390[seuratQCMergedCleanedDS$meanExpressionTreg > percentile_75_Treg & seuratQCMergedCleanedDS$meanExpressionTconv > percentile_75_Tconv] <- "Both"
+seuratQCMergedCleanedDS$cellTypeP390[seuratQCMergedCleanedDS$meanExpressionTreg > percentile_75_Treg & seuratQCMergedCleanedDS$meanExpressionTconv <= percentile_75_Tconv] <- "Treg"
+seuratQCMergedCleanedDS$cellTypeP390[seuratQCMergedCleanedDS$meanExpressionTreg <= percentile_75_Treg & seuratQCMergedCleanedDS$meanExpressionTconv > percentile_75_Tconv] <- "Tconv"
+
+# Verify the new column
+table(seuratQCMergedCleanedDS$cellTypeP390)
+```
 
 ```{r genesOfInterestOnUMAP_TconvModuleExpression}
 nClust <- length(table(seuratQCMergedCleanedDS@meta.data$seurat_clusters))
@@ -4310,16 +4688,6 @@ dev.off()
 rm_tmp(ask = FALSE)
 ```
 
-```{r setHTAsColumn}
-# Fetch the data from the "HT" assay
-ht_data <- seuratQCMergedCleaned[["HT"]]@data
-
-# Get the names of the HT assay for each cell
-ht_names <- colnames(ht_data)
-
-# Add the HT names to the metadata
-seuratQCMergedCleaned[["HT_names"]] <- ht_names
-```
 ```{r showHashtagsOnUMAP}
 pdf(file.path(plotDir,
   paste0(filenameSuffix, "_UMAP_RNA_HTLabel.pdf")),
@@ -4338,16 +4706,6 @@ DimPlot(object = seuratQCMergedCleaned,
 dev.off()
 ```
 
-```{r setHTAsColumnDS}
-# Fetch the data from the "HT" assay
-ht_data <- seuratQCMergedCleanedDS[["HT"]]@data
-
-# Get the names of the HT assay for each cell
-ht_names <- colnames(ht_data)
-
-# Add the HT names to the metadata
-seuratQCMergedCleanedDS[["HT_names"]] <- ht_names
-```
 ```{r showHashtagsOnUMAPDS}
 pdf(file.path(plotDir,
   paste0(filenameSuffix, "_UMAP_RNA_HTLabelDS.pdf")),
@@ -7279,7 +7637,7 @@ gated_data_3 <- gated_data_2[gated_data_2$anti.human.CD25 > 7.5 & gated_data_2$a
 cellsTregDSB <- gated_data_3$HT_names
 ```
 
-```{r AgSpecificCellsPerStim}
+```{r AgSpecificCellsPerStimLogNorm}
 # Extract the relevant metadata for cellsTreg and cellsTconv
 metaData.df.tmp <- seuratQCMergedCleaned@meta.data
 
@@ -7315,7 +7673,7 @@ write.xlsx(combined_table, output_file)
 rm_tmp(ask = FALSE)
 ```
 
-```{r AgSpecificCellsPerStim}
+```{r AgSpecificCellsPerStimDSBNorm}
 # Extract the relevant metadata for cellsTreg and cellsTconv
 metaData.df.tmp <- seuratQCMergedCleaned@meta.data
 
@@ -7853,6 +8211,126 @@ seuratQCMergedCleaned$cellTypeDSB[seuratQCMergedCleaned$HT_names %in% cellsTregD
 seuratQCMergedCleaned$cellTypeDSB[seuratQCMergedCleaned$HT_names %in% cellsTconvDSB] <- "Tconv"
 ```
 
+```{r clusterProportionPlotsWithCellTypeCalls}
+nClust <- length(table(seuratQCMergedCleanedDS@meta.data$seurat_clusters))
+nClustString <- paste0("_", as.character(nClust), "Clusters")
+
+# Ensure the variables are factors
+seuratQCMergedCleanedDS@meta.data$studyGroup <- as.factor(seuratQCMergedCleanedDS@meta.data$studyGroup)
+seuratQCMergedCleanedDS@meta.data$stimulationFigures <- as.factor(seuratQCMergedCleanedDS@meta.data$stimulationFigures)
+seuratQCMergedCleanedDS@meta.data$donorIdFigures <- as.factor(seuratQCMergedCleanedDS@meta.data$donorIdFigures)
+seuratQCMergedCleanedDS@meta.data$seurat_clusters <- as.factor(seuratQCMergedCleanedDS@meta.data$seurat_clusters)
+seuratQCMergedCleanedDS@meta.data$cellType <- as.factor(seuratQCMergedCleanedDS$cellType)
+seuratQCMergedCleanedDS@meta.data$cellTypistCalling <- as.factor(seuratQCMergedCleanedDS$cellTypistCalling)
+
+# Extract metadata
+metadata.tmp <- seuratQCMergedCleanedDS@meta.data
+
+# all together now
+# Create the three plots
+plot1.tmp <- ggplot(metadata.tmp, aes(x = seurat_clusters, fill = studyGroup)) +
+  geom_bar(position = "fill") +
+  labs(x = "Seurat Clusters", y = "Proportion", fill = "Study Group") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+    axis.title.x = element_blank())
+
+plot2.tmp <- ggplot(metadata.tmp, aes(x = seurat_clusters, fill = stimulationFigures)) +
+  geom_bar(position = "fill") +
+  labs(x = "Seurat Clusters", y = "Proportion", fill = "Stimulation") +
+  scale_fill_manual(values = palStimulation) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+    axis.title.x = element_blank())
+
+plot3.tmp <- ggplot(metadata.tmp, aes(x = seurat_clusters, fill = donorIdFigures)) +
+  geom_bar(position = "fill") +
+  labs(x = "Seurat Clusters", y = "Proportion", fill = "Donor ID") +
+  scale_fill_manual(values = palDonorId) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+    axis.title.x = element_blank())
+
+plot4.tmp <- ggplot(metadata.tmp, aes(x = seurat_clusters, fill = cellType)) +
+  geom_bar(position = "fill") +
+  labs(x = "Seurat Clusters", y = "Proportion", fill = "TotalSeq cellType") +
+  scale_fill_manual(values = palCellType) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+    axis.title.x = element_blank())
+
+plot5.tmp <- ggplot(metadata.tmp, aes(x = seurat_clusters, fill = cellTypistCalling)) +
+  geom_bar(position = "fill") +
+  labs(x = "Seurat Clusters", y = "Proportion", fill = "CellTypist calling") +
+  scale_fill_manual(values = palCellTypist) +
+  theme_minimal()
+
+# Combine the plots vertically
+combined_plot <- plot_grid(plot1.tmp, plot2.tmp, plot3.tmp, plot4.tmp, plot5.tmp, ncol = 1, align = "v")
+
+# Save the combined plot to a PDF
+pdf(file.path(plotDir, paste0(filenameSuffix, nClustString, "_Combined_Proportions_in_seurat_clusters_cellTypeCalls.pdf")), height = 7, width = 7)
+print(combined_plot)
+dev.off()
+
+# all together now (POSTER
+fontSize <- 14
+
+# Create the three plots
+plot1 <- ggplot(metadata, aes(x = seurat_clusters, fill = studyGroup)) +
+  geom_bar(position = "fill") +
+  labs(x = NULL, y = "Proportion", fill = "Study Group", title = "Proportions of Study Group in Seurat Clusters") +
+  theme_minimal() +
+  theme(text = element_text(size = fontSize),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = fontSize),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = fontSize),
+    legend.text = element_text(size = fontSize),
+    legend.title = element_text(size = fontSize),
+    strip.text = element_text(size = fontSize),
+    plot.title = element_text(size = fontSize))
+
+plot2 <- ggplot(metadata, aes(x = seurat_clusters, fill = stimulationFigures)) +
+  geom_bar(position = "fill") +
+  labs(x = NULL, y = "Proportion", fill = "Stimulation", title = "Proportions of Stimulation in Seurat Clusters") +
+  scale_fill_manual(values = palStimulation) +
+  theme_minimal() +
+  theme(text = element_text(size = fontSize),
+    axis.text.x = element_blank(),
+    axis.text.y = element_text(size = fontSize),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(size = fontSize),
+    legend.text = element_text(size = fontSize),
+    legend.title = element_text(size = fontSize),
+    strip.text = element_text(size = fontSize),
+    plot.title = element_text(size = fontSize))
+
+plot3 <- ggplot(metadata, aes(x = seurat_clusters, fill = donorIdFigures)) +
+  geom_bar(position = "fill") +
+  labs(x = "Seurat Clusters", y = "Proportion", fill = "Donor ID", title = "Proportions of Donor ID in Seurat Clusters") +
+  scale_fill_manual(values = palDonorId) +
+  theme_minimal() +
+  theme(text = element_text(size = fontSize),
+    axis.text.x = element_text(size = fontSize),
+    axis.text.y = element_text(size = fontSize),
+    axis.title.x = element_text(size = fontSize),
+    axis.title.y = element_text(size = fontSize),
+    legend.text = element_text(size = fontSize),
+    legend.title = element_text(size = fontSize),
+    strip.text = element_text(size = fontSize),
+    plot.title = element_text(size = fontSize))
+
+# Combine the plots vertically
+combined_plot <- plot_grid(plot1, plot2, plot3, ncol = 1, align = "v", rel_heights = c(1, 1, 1.2))
+
+# Save the combined plot to a PDF
+pdf(file.path(plotDir, paste0(filenameSuffix, nClustString, "_Combined_Proportions_in_seurat_clusters_poster.pdf")), height = 5, width = 6)
+print(combined_plot)
+dev.off()
+rm_tmp(ask = FALSE)
+```
+
 ```{r logNormVsDSBCellTypeVenn}
 library(ggvenn)
 
@@ -7895,7 +8373,72 @@ ggsave(file.path(plotDir, "cellType_VennDiagram.png"), venn.plot, height = 10, w
 rm_tmp(ask = FALSE)
 ```
 
-```{r cellTypeAssignmentAlluvialPlot}
+```{r TregCallingMethodsVennDiagram}
+# venn diagram with cells called Treg in:
+# seuratQCMergedCleaned$cellType
+# seuratQCMergedCleaned@meta.data$cellTypist
+# and seuratQCMergedCleanedDS@meta.data$seurat_clusters 3 and 4
+
+
+# Extract cell barcodes for Treg in seuratQCMergedCleaned$cellType
+treg_TotalSeq <- names(seuratQCMergedCleaned$cellType[seuratQCMergedCleaned$cellType == "Treg"])
+
+# Extract cell barcodes for Treg in seuratQCMergedCleaned@meta.data$cellTypist
+treg_cellTypist <- rownames(seuratQCMergedCleaned@meta.data[seuratQCMergedCleaned@meta.data$cellTypistCalling == "Treg", ])
+
+# Extract cell barcodes for clusters 3 and 4 in seuratQCMergedCleanedDS@meta.data$seurat_clusters
+treg_clusters <- rownames(seuratQCMergedCleanedDS@meta.data[seuratQCMergedCleanedDS@meta.data$seurat_clusters %in% c(3, 4), ])
+
+# Extract cell barcodes for cells that are Tregs according to the P390 module
+treg_P390 <- names(seuratQCMergedCleaned$cellTypeP390[seuratQCMergedCleaned$cellTypeP390 == "Treg"])
+
+# 4 methods
+# Create a list of these sets
+venn_list <- list(
+  TotalSeq = treg_TotalSeq,
+  CellTypist = treg_cellTypist,
+  Clusters = treg_clusters,
+  P390 = treg_P390
+)
+
+# start pdf printing
+pdf(file.path(plotDir,
+  paste0(filenameSuffix, "TregCalling4MethodsVenn.pdf")),
+height = 5,
+width = 7)
+
+# Generate the Venn diagram using ggvenn
+venn.plot.tmp <- ggvenn(venn_list, fill_color = c("red", "green", "blue", "Orange"))
+
+# Print the venn plot
+print(venn.plot.tmp)
+dev.off()
+
+# 3 methods
+# Create a list of these sets
+venn_list <- list(
+  TotalSeq = treg_TotalSeq,
+  CellTypist = treg_cellTypist,
+  Clusters = treg_clusters
+)
+
+# start pdf printing
+pdf(file.path(plotDir,
+  paste0(filenameSuffix, "TregCalling3MethodsVenn.pdf")),
+height = 5,
+width = 7)
+
+# Generate the Venn diagram using ggvenn
+venn.plot.tmp <- ggvenn(venn_list, fill_color = c("red", "green", "blue"))
+
+# Print the venn plot
+print(venn.plot.tmp)
+dev.off()
+
+rm_tmp(ask = FALSE)
+```
+
+```{r cellTypeAssignmentCITEseqAlluvialPlot}
 library(ggalluvial)
 
 # Extract cell type assignments
@@ -7927,11 +8470,70 @@ res = 600)
 # Create an alluvial plot
 alluvialPlot.tmp <- ggplot(cellCounts.tmp,
   aes(axis1 = cellTypeLogNorm, axis2 = cellTypeDSB, y = count)) +
-  geom_alluvium(aes(fill = cellTypeLogNorm)) +
-  geom_stratum() +
-  geom_text(stat = "stratum", aes(label = after_stat(stratum))) +
+  geom_flow(aes(fill = cellTypeLogNorm), stat = "alluvium") +
+  geom_stratum(alpha = .5) +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum)), size = 3) +
   scale_x_discrete(limits = c("cellTypeLogNorm", "cellTypeDSB"), expand = c(0.15, 0.05)) +
   labs(title = "Alluvial Plot of Cell Type Assignments",
+    x = "Method",
+    y = "Number of Cells") +
+  theme_minimal()
+
+# Print the alluvial plot
+print(alluvialPlot.tmp)
+dev.off()
+
+rm_tmp(ask = FALSE)
+```
+
+```{r cellTypeAssignmentLogNormVsCellTypistAlluvialPlot}
+library(ggalluvial)
+
+# Extract cell type assignments
+cellType.tmp <- seuratQCMergedCleaned$cellType
+# Extract cell type assignments from CellTypist
+cellTypeCellTypist.tmp <- seuratQCMergedCleaned@meta.data$cellTypistCalling
+
+# Ensure cell barcodes are assigned as names
+names(cellTypeCellTypist.tmp) <- rownames(seuratQCMergedCleaned@meta.data)
+
+# Verify the table
+table(cellTypeCellTypist.tmp)
+
+# Create a data frame with cell barcodes and their corresponding cell type assignments
+cellAssignments.tmp <- data.frame(
+  cellBarcode = names(cellType.tmp),
+  cellTypeLogNorm = cellType.tmp,
+  cellTypeCellTypist = cellTypeCellTypist.tmp[names(cellType.tmp)]
+)
+
+# Count the number of cells in each category
+cellCounts.tmp <- cellAssignments.tmp %>%
+  group_by(cellTypeLogNorm, cellTypeCellTypist) %>%
+  summarise(count = n())
+
+# Print the cell counts to verify
+print(cellCounts.tmp)
+
+# Ensure the factors are correctly ordered
+cellCounts.tmp$cellTypeLogNorm <- factor(cellCounts.tmp$cellTypeLogNorm, levels = unique(cellCounts.tmp$cellTypeLogNorm))
+cellCounts.tmp$cellTypeCellTypist <- factor(cellCounts.tmp$cellTypeCellTypist, levels = unique(cellCounts.tmp$cellTypeCellTypist))
+
+png(file.path(plotDir,
+  paste0(filenameSuffix, "logNormVsCellTypistAlluvialPlot.png")),
+height = 5,
+width = 7,
+units = "in",
+res = 600)
+
+# Create an alluvial plot
+alluvialPlot.tmp <- ggplot(cellCounts.tmp,
+  aes(axis1 = cellTypeLogNorm, axis2 = cellTypeCellTypist, y = count)) +
+  geom_flow(aes(fill = cellTypeLogNorm), stat = "alluvium") +
+  geom_stratum(alpha = .5) +
+  geom_text(stat = "stratum", aes(label = after_stat(stratum)), size = 3) +
+  scale_x_discrete(limits = c("cellTypeLogNorm", "cellTypeCellTypist"), expand = c(0.15, 0.05)) +
+  labs(title = "TotalSeq (logNorm) vs CellTypist",
     x = "Method",
     y = "Number of Cells") +
   theme_minimal()
@@ -8179,32 +8781,38 @@ cellsTreg <- gated_data_3$HT_names
 
 ```{r clusterTregCellsSeparately}
 # make a subset seurat object that only contains the cells where $cellType == "Treg"
-seuratTreg.tmp <- subset(seuratQCMergedCleanedDS, subset = cellType == "Treg")
+seuratTreg <- subset(seuratQCMergedCleanedDS, subset = cellType == "Treg")
+
+# now subset down to the cells in RNAseq clusters 3 and 4
+seuratTreg <- subset(seuratQCMergedCleanedDS, subset = seurat_clusters %in% c("3", "4"))
+
+# save old clusters
+seuratTreg@meta.data$seuratClustersAllCellsDS <- seuratTreg@meta.data$seurat_clusters
 
 # Re-run normalization, clustering, UMAP, etc on this subset
-DefaultAssay(seuratQCMergedCleanedDS) <- "RNA"
-seuratQCMergedCleanedDS <- JoinLayers(seuratQCMergedCleanedDS, layers = c("RNA"))
-seuratQCMergedCleanedDS <- NormalizeData(object = seuratQCMergedCleanedDS,
+DefaultAssay(seuratTreg) <- "RNA"
+seuratTreg <- SeuratObject::JoinLayers(seuratTreg, layers = c("RNA"))
+seuratTreg <- NormalizeData(object = seuratTreg,
   verbose = FALSE,
   normalization.method = "LogNormalize",
   margin = 2,
   assay = "FB")
 
-seuratQCMergedCleanedDS <- NormalizeData(object = seuratQCMergedCleanedDS,
+seuratTreg <- NormalizeData(object = seuratTreg,
   verbose = FALSE,
   normalization.method = "LogNormalize",
   margin = 2,
   assay = "HT")
 
-# seuratQCMergedCleanedDS <- NormalizeData(object = seuratQCMergedCleanedDS, verbose = FALSE)
-seuratQCMergedCleanedDS <- FindVariableFeatures(object = seuratQCMergedCleanedDS,
+# seuratTreg <- NormalizeData(object = seuratTreg, verbose = FALSE)
+seuratTreg <- FindVariableFeatures(object = seuratTreg,
   selection.method = "vst", nfeatures = 2000, verbose = FALSE)
 
-seuratQCMergedCleanedDS <- ScaleData(object = seuratQCMergedCleanedDS, verbose = FALSE)
-seuratQCMergedCleanedDS <- RunPCA(object = seuratQCMergedCleanedDS, npcs = 30, verbose = FALSE)
+seuratTreg <- ScaleData(object = seuratTreg, verbose = FALSE)
+seuratTreg <- RunPCA(object = seuratTreg, npcs = 30, verbose = FALSE)
 
 # Elbow plot
-elbowPlot.tmp <- ElbowPlot(seuratQCMergedCleanedDS)
+elbowPlot.tmp <- ElbowPlot(seuratTreg)
 
 pdf(file.path(plotDir,
   paste0(filenameSuffix, "_elbowPlotUMAP.pdf")),
@@ -8214,9 +8822,7 @@ width = 6)
 print(elbowPlot.tmp)
 
 dev.off()
-rm_tmp(ask = FALSE)
-
-
+# rm_tmp(ask = FALSE)
 
 # let's do some hyperparameter optimization
 # create grid of hyperparameters to test
@@ -8259,14 +8865,14 @@ clusteringMetrics <- foreach(
 ) %dopar% {
   # do the UMAP clustering on the Seurat object
   set.seed(6022)
-  seuratQCMergedCleanedDS <- FindNeighbors(seuratQCMergedCleanedDS, dims = 1:findNeighborsDim, verbose = FALSE)
-  seuratQCMergedCleanedDS <- FindClusters(seuratQCMergedCleanedDS, resolution = findClustersRes, verbose = FALSE)
+  seuratTreg <- FindNeighbors(seuratTreg, dims = 1:findNeighborsDim, verbose = FALSE)
+  seuratTreg <- FindClusters(seuratTreg, resolution = findClustersRes, verbose = FALSE)
 
   # extract the cluster information
-  metaData.df <- seuratQCMergedCleanedDS@meta.data
+  metaData.df <- seuratTreg@meta.data
 
   # Extract PCA embeddings
-  pca_embeddings <- seuratQCMergedCleanedDS@reductions$pca@cell.embeddings
+  pca_embeddings <- seuratTreg@reductions$pca@cell.embeddings
 
   clusterMat <- pca_embeddings
   clusterVect <- as.numeric(metaData.df$seurat_clusters)
@@ -8323,15 +8929,72 @@ hyperParamGrid.df$meanEvalMetric <- rowMeans(hyperParamGrid.df[, c("DBIndexInver
 hyperParamGrid.df <- hyperParamGrid.df %>%
   arrange(nClusters, desc(meanEvalMetric))
 
-write.xlsx(hyperParamGrid.df, file = file.path(tableDir, "20242017_RNA_clustering_hyperParamGrid.xlsx"))
+write.xlsx(hyperParamGrid.df, file = file.path(tableDir, "20241127_RNA_clustering_TregOnly_hyperParamGrid.xlsx"))
 
 set.seed(6022)
-seuratQCMergedCleanedDS <- FindNeighbors(seuratQCMergedCleanedDS, dims = 1:14) # 14
-seuratQCMergedCleanedDS <- FindClusters(seuratQCMergedCleanedDS, resolution = 0.25) # 0.4)
+seuratTreg <- FindNeighbors(seuratTreg, dims = 1:20)
+seuratTreg <- FindClusters(seuratTreg, resolution = 0.05)
+
+
+# Optimize UMAP hyperparameters with scDEED
+K_ <- 16 # number of PCs
+
+start_time.tmp <- Sys.time()
+
+scDEEDResult <- scDEED(seuratTreg, # input Seurat object (must have UMAP or t-SNE already run)
+  K = K_, # number of PCs
+  reduction.method = "umap", # 'umap' or 'tsne'
+  min.dist =  c(0.001, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1), # c(0.001, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1), # 0.4, # scDEED default is 0.1 & 0.4; Seurat default is 0.3
+  n_neighbors = c(5, 20, 30, 40, 50), # c(5, 20, 30, 40, 50), # 5, # c(5, 20, 30, 40, 50), #scDEED defaults. Seurat default is 30.
+  similarity_percent = 0.5, # default
+  dubious_cutoff = 0.05, # default
+  trustworthy_cutoff = 0.95) # default
+
+end_time.tmp <- Sys.time()
+
+time_elapsed <- end_time.tmp - start_time.tmp
+print(time_elapsed) # Time difference of 19.69495 mins
+
+rm_tmp(ask = FALSE)
+
+# add $number_trustworthy_cells and $number_intermediate_cells to scDEEDResult
+scDEEDResult$full_results$number_trustworthy_cells <- str_count(scDEEDResult$full_results$trustworthy_cells, ",") + 1
+scDEEDResult$full_results$number_intermediate_cells <- str_count(scDEEDResult$full_results$intermediate_cells, ",") + 1
+
+# utilizing scDEED output
+min(scDEEDResult$num_dubious$number_dubious_cells) # 437 # 26 with opt
+opt <- which(scDEEDResult$num_dubious$number_dubious_cells == min(scDEEDResult$num_dubious$number_dubious_cells))
+m <- scDEEDResult$num_dubious$min.dist[opt] # 0.1 # 0.3 #0.5
+n <- scDEEDResult$num_dubious$n_neighbors[opt] # 30 (only value tested) # 5 #5
+
+dubious_cells <- scDEEDResult$full_results$dubious_cells[opt]
+dubious_cells <- as.numeric(strsplit(dubious_cells, ",")[[1]])
+trustworthy_cells <- scDEEDResult$full_results$trustworthy_cells[opt]
+trustworthy_cells <- as.numeric(strsplit(trustworthy_cells, ",")[[1]])
+set.seed(6022)
+SeuratUMAPscDEEDOpt <- RunUMAP(seuratTreg,
+  dims = 1:K_,
+  min.dist = m,
+  n.neighbors = n)
+# seed.use = 100)
+
+# match up the dubious/trustworthy lists with the seurat data
+rownames_seurat <- rownames(SeuratUMAPscDEEDOpt@meta.data)
+rownames_dubious <- rownames_seurat[dubious_cells]
+rownames_trustworthy <- rownames_seurat[trustworthy_cells]
+
+designation <- rep("intermediate", length(rownames_seurat))
+
+designation[rownames_seurat %in% rownames_dubious] <- "dubious"
+designation[rownames_seurat %in% rownames_trustworthy] <- "trustworthy"
+
+SeuratUMAPscDEEDOpt@meta.data$designation <- designation
+# end of scDEED
 
 set.seed(6022)
-seuratQCMergedCleanedDS <- RunUMAP(object = seuratQCMergedCleanedDS, reduction = "pca",
-  dims = 1:14,
+seuratTreg <- RunUMAP(object = seuratTreg,
+  reduction = "pca",
+  dims = 1:20,
   n.neighbors = 5, # 30
   min.dist = 0.6) # 0.1
 
@@ -8344,18 +9007,18 @@ clusterMarkers <- list()
 clusterName[["RNA"]] <- paste0("seurat_clusters_RNA_", str_replace(clusterResolution[["RNA"]], "\\.", "p"))
 
 # Add metadata to the Seurat object
-seuratQCMergedCleanedDS <- seuratQCMergedCleanedDS %>%
-  AddMetaData(Idents(seuratQCMergedCleanedDS), col.name = clusterName[["RNA"]])
+seuratTreg <- seuratTreg %>%
+  AddMetaData(Idents(seuratTreg), col.name = clusterName[["RNA"]])
 
 # Set the identifiers
-Idents(seuratQCMergedCleanedDS) <- seuratQCMergedCleanedDS@meta.data[[clusterName[["RNA"]]]]
+Idents(seuratTreg) <- seuratTreg@meta.data[[clusterName[["RNA"]]]]
 
 # Ensure data layers are joined
-seuratQCMergedCleanedDS <- JoinLayers(seuratQCMergedCleanedDS)
+seuratTreg <- JoinLayers(seuratTreg)
 
 # Perform the FindAllMarkers function and store the results in clusterMarkers
 clusterMarkers[[paste0("RNA_", clusterName[["RNA"]])]] <-
-  FindAllMarkers(seuratQCMergedCleanedDS, assay = "RNA")
+  FindAllMarkers(seuratTreg, assay = "RNA")
 
 # Print cluster markers
 print("Cluster markers found:")
@@ -8363,19 +9026,263 @@ print(clusterMarkers[[paste0("RNA_", clusterName[["RNA"]])]])
 
 palRNAClusters <-
   big_colorblind_pal(
-    n_distinct(seuratQCMergedCleanedDS@meta.data[[clusterName[["RNA"]]]]),
+    n_distinct(seuratTreg@meta.data[[clusterName[["RNA"]]]]),
     shuffle_colors = TRUE,
     drop_yellow = TRUE, drop_black = TRUE) %>%
-  setNames(sort(unique(seuratQCMergedCleanedDS@meta.data[[clusterName[["RNA"]]]])))
+  setNames(sort(unique(seuratTreg@meta.data[[clusterName[["RNA"]]]])))
 
 # Get the number of distinct RNA clusters
-num_clusters <- n_distinct(seuratQCMergedCleanedDS@meta.data[[clusterName[["RNA"]]]])
+num_clusters <- n_distinct(seuratTreg@meta.data[[clusterName[["RNA"]]]])
 
 # Get the "ggsci::uniform_startrek" palette and adjust it
 palRNAClusters <- paletteer_d("khroma::okabeitoblack", n = num_clusters) %>%
   sample() %>%  # Shuffle colors
   .[!grepl("yellow|black", .)] %>%  # Drop yellow and black colors
-  setNames(sort(unique(seuratQCMergedCleanedDS@meta.data[[clusterName[["RNA"]]]])))
+  setNames(sort(unique(seuratTreg@meta.data[[clusterName[["RNA"]]]])))
+
+# rm_tmp(ask = FALSE)
+```
+
+```{r lookAtClustersTregs}
+
+nClust <- length(table(seuratTreg@meta.data$seurat_clusters))
+nClustString <- paste0("_", as.character(nClust), "Clusters")
+
+pdf(file.path(plotDir,
+  paste0(filenameSuffix, nClustString, "_UMAP_RNA_TregOnly.pdf")),
+height = 6,
+width = 10)
+
+DimPlot(object = seuratTreg,
+  reduction = "umap",
+  group = "seurat_clusters",
+  pt.size = 1) +
+  scale_color_manual(values = palRNAClusters) +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster", title = "") +
+  theme(aspect.ratio = 1) #+
+#   facet_wrap(~seurat_clusters)
+
+dev.off()
+
+pdf(file.path(plotDir,
+  paste0(filenameSuffix, nClustString, "_UMAP_RNA_clusterFacet_TregOnly.pdf")),
+height = 6,
+width = 10)
+
+DimPlot(object = seuratTreg,
+  reduction = "umap",
+  group = "seurat_clusters",
+  pt.size = 1) +
+  scale_color_manual(values = palRNAClusters) +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster", title = "") +
+  theme(aspect.ratio = 1) +
+  facet_wrap(~seurat_clusters)
+
+dev.off()
+
+# Extract UMAP coordinates and metadata
+umap_data <- as.data.frame(seuratTreg@reductions$umap@cell.embeddings)
+umap_data$seurat_clusters <- seuratTreg@meta.data$seurat_clusters
+umap_data$stimulationFigures <- seuratTreg@meta.data$stimulationFigures
+
+# Create the plot
+pdf(file.path(plotDir,
+  paste0(filenameSuffix, nClustString, "_UMAP_RNA_stimulationFacet_TregOnly.pdf")),
+height = 6,
+width = 10)
+
+ggplot(umap_data, aes(x = umap_1, y = umap_2, color = seurat_clusters)) +
+  geom_point(size = 1) +
+  scale_color_manual(values = palRNAClusters) +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster", title = "") +
+  theme(aspect.ratio = 1, legend.position = "none") +
+  facet_wrap(~stimulationFigures)
+
+dev.off()
+```
+
+```{r clusterProportionPlotsWithCellTypeCalls}
+nClust <- length(table(seuratTreg@meta.data$seurat_clusters))
+nClustString <- paste0("_", as.character(nClust), "Clusters")
+
+# Ensure the variables are factors
+seuratTreg@meta.data$studyGroup <- as.factor(seuratTreg@meta.data$studyGroup)
+seuratTreg@meta.data$stimulationFigures <- as.factor(seuratTreg@meta.data$stimulationFigures)
+seuratTreg@meta.data$donorIdFigures <- as.factor(seuratTreg@meta.data$donorIdFigures)
+seuratTreg@meta.data$seurat_clusters <- as.factor(seuratTreg@meta.data$seurat_clusters)
+seuratTreg@meta.data$seuratClustersAllCellsDS <- as.factor(seuratTreg@meta.data$seuratClustersAllCellsDS)
+seuratTreg@meta.data$cellType <- as.factor(seuratTreg$cellType)
+seuratTreg@meta.data$cellTypistCalling <- as.factor(seuratTreg$cellTypistCalling)
+
+# Extract metadata
+metadata.tmp <- seuratTreg@meta.data
+
+# all together now
+# Create the three plots
+plot1.tmp <- ggplot(metadata.tmp, aes(x = seurat_clusters, fill = studyGroup)) +
+  geom_bar(position = "fill") +
+  labs(x = "Seurat Clusters", y = "Proportion", fill = "Study Group") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+    axis.title.x = element_blank())
+
+plot2.tmp <- ggplot(metadata.tmp, aes(x = seurat_clusters, fill = stimulationFigures)) +
+  geom_bar(position = "fill") +
+  labs(x = "Seurat Clusters", y = "Proportion", fill = "Stimulation") +
+  scale_fill_manual(values = palStimulation) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+    axis.title.x = element_blank())
+
+plot3.tmp <- ggplot(metadata.tmp, aes(x = seurat_clusters, fill = donorIdFigures)) +
+  geom_bar(position = "fill") +
+  labs(x = "Seurat Clusters", y = "Proportion", fill = "Donor ID") +
+  scale_fill_manual(values = palDonorId) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+    axis.title.x = element_blank())
+
+plot4.tmp <- ggplot(metadata.tmp, aes(x = seurat_clusters, fill = seuratClustersAllCellsDS)) +
+  geom_bar(position = "fill") +
+  labs(x = "Seurat Clusters", y = "Proportion", fill = "Original Clusters") +
+  # scale_fill_manual(values = palCellType) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+    axis.title.x = element_blank())
+
+plot5.tmp <- ggplot(metadata.tmp, aes(x = seurat_clusters, fill = cellTypistCalling)) +
+  geom_bar(position = "fill") +
+  labs(x = "Seurat Clusters", y = "Proportion", fill = "CellTypist calling") +
+  scale_fill_manual(values = palCellTypist) +
+  theme_minimal()
+
+# Combine the plots vertically
+combined_plot <- plot_grid(plot1.tmp, plot2.tmp, plot3.tmp, plot4.tmp, plot5.tmp, ncol = 1, align = "v")
+
+# Save the combined plot to a PDF
+pdf(file.path(plotDir, paste0(filenameSuffix, nClustString, "_Combined_Proportions_in_seurat_clusters_TregOnly.pdf")), height = 9, width = 8)
+print(combined_plot)
+dev.off()
+```
+
+```{r getTop10ClusterDefiningGenesDownsampled}
+DefaultAssay(seuratTreg) <- "RNA"
+Idents(seuratTreg) <- "seurat_clusters"
+# Join the data layers
+seuratTreg <- JoinLayers(seuratTreg)
+
+clusterMarkers <- FindAllMarkers(seuratTreg)
+
+# implement a filter so that we only consider genes expressed in a certain percentage of cells
+# Calculate the percentage of cells with non-zero expression for each gene in each cluster
+expressionData <- FetchData(seuratTreg, vars = unique(clusterMarkers$gene))
+metadata <- seuratTreg@meta.data %>%
+  dplyr::select(seurat_clusters) %>%
+  rownames_to_column("cell")
+
+expressionData <- expressionData %>%
+  rownames_to_column("cell") %>%
+  left_join(metadata, by = "cell")
+
+expressionDataLong <- expressionData %>%
+  pivot_longer(cols = -c(cell, seurat_clusters), names_to = "gene", values_to = "expression")
+
+expressionDataSummary <- expressionDataLong %>%
+  group_by(seurat_clusters, gene) %>%
+  summarise(percent_expressed = mean(expression > 0) * 100)
+
+min_percent_expressed <- 30
+clusterMarkers <- clusterMarkers %>%
+  left_join(expressionDataSummary, by = c("cluster" = "seurat_clusters", "gene" = "gene")) %>%
+  filter(percent_expressed >= min_percent_expressed)
+# end of expressed in x% of cells filtering
+
+
+topMarkersLong <- clusterMarkers %>%
+  dplyr::group_by(cluster) %>%
+  dplyr::filter(avg_log2FC > 0) %>%
+  dplyr::slice_max(avg_log2FC, n = 10) %>%
+  dplyr::slice_min(p_val_adj, n = 10) %>%
+  dplyr::mutate(fc_order = order(avg_log2FC))
+
+topMarkers <- topMarkersLong %>%
+  pivot_wider(id_cols = "fc_order",
+    names_from = "cluster",
+    values_from = "gene")
+
+topMarkersWide <- clusterMarkers %>%
+  # dplyr::filter(!str_detect(gene, "Trav|Trbv")) %>%
+  dplyr::mutate(cluster_id = paste0("Cluster ", cluster),
+    cluster_id = factor(cluster_id, levels = mixedsort(unique(cluster_id)))) %>%
+  dplyr::group_by(cluster_id) %>%
+  dplyr::mutate(row_order = order(p_val_adj)) %>%
+  pivot_wider(id_cols = row_order,
+    names_from = "cluster_id",
+    names_glue = "{cluster_id}_{.value}",
+    values_from = c("cluster_id",
+      "gene",
+      "avg_log2FC",
+      "p_val_adj"))
+
+clusters <- unique(clusterMarkers$cluster) %>% mixedsort()
+clusterLabs <- paste0("Cluster ", rep(clusters)) # , each = 4
+
+columnLabs <- c("cluster_id",
+  "gene",
+  "avg_log2FC",
+  "p_val_adj")
+
+nClust <- length(unique(seuratQCMergedCleanedDS$seurat_clusters))
+columnLabs <- rep(columnLabs, nClust)
+
+columnLabs <- paste0(clusterLabs, "_", columnLabs)
+
+topMarkersWide <- topMarkersWide %>%
+  dplyr::select(columnLabs)
+#```
+
+### Top-cluster defining genes
+
+# The top 10 cluster defining genes are shown in the table below. These genes are selected by ranking by p-value among genes that are up in a given cluster relative to all others. 
+
+# ```{r clust_table, results = 'asis'}
+topMarkers <- topMarkers %>%
+  dplyr::select(-one_of("fc_order"))
+
+topMarkers %>%
+  kable(row.names = F) %>%
+  kable_styling("striped",
+    full_width = F,
+    position = "left") %>%
+  scroll_box(height = "900px")
+
+write.csv(topMarkers, file.path(tableDir, "top10_genes_per_cluster_downsampled_Treg.csv"), quote = FALSE, row.names = TRUE)
+```
+
+```{r clusterDefiningGenesDotPlot}
+nClust <- length(table(seuratTreg@meta.data$seurat_clusters))
+nClustString <- paste0("_", as.character(nClust), "Clusters")
+
+fontSize <- 12
+
+# Extract the gene names from the topMarkers tibble
+genes.tmp <- unique(unlist(topMarkers))
+
+# Create a DotPlot of the expression of these genes in seuratQCMergedCleanedDS
+dot_plot <- DotPlot(seuratTreg, features = genes.tmp) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1, size = 8),
+    text = element_text(size = fontSize),
+    axis.text.y = element_text(size = fontSize),
+    axis.title.y = element_text(size = fontSize),
+    legend.text = element_text(size = fontSize),
+    legend.title = element_text(size = fontSize),
+    strip.text = element_text(size = fontSize),
+    plot.title = element_text(size = fontSize))
+
+# Print the DotPlot
+pdf(file.path(plotDir, paste0(filenameSuffix, nClustString, "_clusterDefiningGenesDotPlotTregs.pdf")), height = 5, width = 12)
+print(dot_plot)
+dev.off()
 
 rm_tmp(ask = FALSE)
 ```
@@ -9359,6 +10266,55 @@ rm_tmp(ask = FALSE)
 # --------------------------------------------------------------------------
 ```
 
+```{r makeAirlinePlotTregOnly}
+# -------------------all three stimulations---------------------------------
+# Extract the cdr3CloneID column from the metadata
+cdr3CloneIDs <- seuratTreg@meta.data$cdr3CloneID
+
+# Count the occurrences of each cdr3CloneID
+cdr3CloneID_counts <- table(cdr3CloneIDs)
+
+# Filter the IDs that have 3 or more occurrences
+cdr3CloneID_filtered <- names(cdr3CloneID_counts[cdr3CloneID_counts >= 2])
+
+# Print the filtered cdr3CloneID names
+# print(cdr3CloneID_filtered)
+airlinePlot(seuratTreg,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences",
+  plotName = "AirlinePlotAllStimTregOnly2Clust")
+
+# --------------------------------------------------------------------------
+
+# -----------------------------------IAR------------------------------------
+# make subset Seurat object
+seurat_subset.tmp <- subset(seuratTreg, subset = stimulationFigures == "IAR")
+
+# Extract the cdr3CloneID column from the metadata
+cdr3CloneIDs <- seurat_subset.tmp@meta.data$cdr3CloneID
+
+# Count the occurrences of each cdr3CloneID
+cdr3CloneID_counts <- table(cdr3CloneIDs)
+
+# Filter the IDs that have 3 or more occurrences
+cdr3CloneID_filtered <- names(cdr3CloneID_counts[cdr3CloneID_counts >= 2])
+
+# Print the filtered cdr3CloneID names
+print(cdr3CloneID_filtered)
+
+airlinePlot(seurat_subset.tmp,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences\nIAR",
+  plotName = "AirlinePlotIARTregOnly2Clust")
+
+rm_tmp(ask = FALSE)
+# --------------------------------------------------------------------------
+```
+
 ### Matt D - style Circos plot chunks
 
 ```{r createObjectsPlotCircosQcCd8}
@@ -9535,4 +10491,52 @@ legend(
   legend = names(palCellTypeGroup), fill = palCellTypeGroup,
   bty = "n", xpd = TRUE)
 invisible(dev.off())
+```
+
+```{r circosWithBandWidth}
+# Install and load the circlize package
+# library(circlize)
+
+# Example data preparation
+# Assume you have a data frame `tcr_data` with columns: `cell1`, `cell2`, and `shared_tcr_count`
+# `cell1` and `cell2` are the cell identifiers, and `shared_tcr_count` is the number of shared TCRs
+
+# Example data
+tcr_data <- data.frame(
+  cell1 = c("A", "A", "B", "C"),
+  cell2 = c("B", "C", "C", "D"),
+  shared_tcr_count = c(5, 3, 2, 4)
+)
+
+# Define the plot directory and filename
+filename <- file.path(plotDir, "circos_plot.png")
+
+# Save the plot to a PNG file
+png(filename = filename, width = 6, height = 5, units = "in", res = 600)
+
+# Initialize the circos plot
+circos.initialize(factors = unique(c(tcr_data$cell1, tcr_data$cell2)), xlim = c(0, 1))
+
+# Add the circos track
+circos.trackPlotRegion(factors = unique(c(tcr_data$cell1, tcr_data$cell2)), ylim = c(0, 1), panel.fun = function(x, y) {
+  circos.axis()
+})
+
+# Add links with varying widths based on shared TCR count
+for (i in 1:nrow(tcr_data)) {
+  circos.link(
+    sector.index1 = tcr_data$cell1[i],
+    point1 = 0.5,
+    sector.index2 = tcr_data$cell2[i],
+    point2 = 0.5,
+    col = "blue",
+    lwd = tcr_data$shared_tcr_count[i]
+  )
+}
+
+# Clear the circos plot
+circos.clear()
+
+# Close the PNG device
+dev.off()
 ```

@@ -77,10 +77,10 @@ options(future.globals.maxSize = 1591289600)
 ```{r set_up_directories, cache = TRUE}
 
 baseDir <- "/Users/tedwards/Documents/projects/P589-1_Cerosaletti_Chen_foreign_autoreactive_CD4_Tcell_10X"
-dataDir <- file.path(baseDir, "data/input")
+dataInputDir <- file.path(baseDir, "data/input")
 plotDir <- file.path(baseDir, "figures")
-tableDir <- file.path(baseDir, "data/output")
-dataDate <- "2024-11-26"
+dataOutputDir <- file.path(baseDir, "data/output")
+dataDate <- "2024-12-09"
 filenameSuffix <- paste0("P589-1_autoreactive_CD4_Tcell_10X.", dataDate)
 
 P589_1Samples <- c("pool589-1_1",
@@ -311,12 +311,12 @@ for (i in 1:length(seuratRawObjects)) {
 ```{r loadTCRData}
 # load the data
 TCRsPool1.df <-
-  read.csv(file.path(dataDir, "filtered_contig_annotations_pool1.csv")) %>%
+  read.csv(file.path(dataInputDir, "filtered_contig_annotations_pool1.csv")) %>%
   data.frame() %>%
   dplyr::mutate(barcode = paste0("1_", barcode))
 
 TCRsPool2.df <-
-  read.csv(file.path(dataDir, "filtered_contig_annotations_pool2.csv")) %>%
+  read.csv(file.path(dataInputDir, "filtered_contig_annotations_pool2.csv")) %>%
   data.frame() %>%
   dplyr::mutate(barcode = paste0("2_", barcode))
 
@@ -595,7 +595,7 @@ dev.off()
 ```
 
 ```{r add_anno}
-annoP589_1 <- read_excel(file.path(dataDir, "P589-1_Final_Annotation.xlsx"),
+annoP589_1 <- read_excel(file.path(dataInputDir, "P589-1_Final_Annotation.xlsx"),
   "Final Annotation")
 
 # Remove duplicated columns based on their values
@@ -1387,7 +1387,7 @@ print(cell_count_df)
 
 
 # Define the output file path
-output_file_path <- file.path(tableDir, "cell_count_table_cleaned.csv")
+output_file_path <- file.path(dataOutputDir, "cell_count_table_cleaned.csv")
 
 # Write the table to a CSV file
 write.csv(cell_count_df, file = output_file_path, row.names = TRUE)
@@ -1568,6 +1568,108 @@ print(umap_plot)
 invisible(dev.off())
 ```
 
+```{r CD8CheckAndFilter}
+library(openxlsx)
+
+# set the default assay to RNA
+DefaultAssay(seuratQCMergedCleaned) <- "RNA"
+
+# we want to remove cells that are likely to be CD8s
+
+# Extract the expression data for CD8A and CD8B
+CD8AExpression.tmp <- FetchData(seuratQCMergedCleaned, vars = "CD8A")
+CD8BExpression.tmp <- FetchData(seuratQCMergedCleaned, vars = "CD8B")
+
+# Let's also look at CD4
+CD4Expression.tmp <- FetchData(seuratQCMergedCleaned, vars = "CD4")
+
+# Convert the data to a data frame
+expressionData.tmp <- data.frame(
+  CD8A = CD8AExpression.tmp$CD8A,
+  CD8B = CD8BExpression.tmp$CD8B,
+  CD4 = CD4Expression.tmp$CD4
+)
+rownames(expressionData.tmp) <- rownames(CD4Expression.tmp)
+
+# Identify the non-zero entries in CD8A and CD8B
+nonZeroBarcodes.tmp <- rownames(expressionData.tmp)[CD8AExpression.tmp$CD8A != 0 | CD8BExpression.tmp$CD8B != 0]
+# nonZeroBarcodesCD8A.tmp <- rownames(expressionData.tmp)[CD8AExpression.tmp$CD8A != 0]
+# nonZeroBarcodesCD8B.tmp <- rownames(expressionData.tmp)[CD8BExpression.tmp$CD8B != 0]
+
+# make a subset of expressionData.tmp that only has the nonZeroBarcodes.tmp
+expressionDataCD8Pos.tmp <- expressionData.tmp[nonZeroBarcodes.tmp, ]
+
+# Subset seuratQCMergedCleaned@meta.data based on these barcodes
+metaDataSubset.df.tmp <- seuratQCMergedCleaned@meta.data %>%
+  filter(barcode %in% nonZeroBarcodes.tmp)
+
+table(metaDataSubset.df.tmp$stimulationFigures)
+# microbial: 288, IAR: 1, Polyclonal: 12
+
+# Group the data by stimulationFigures and donorIdFigures and count the number of cells
+cell_counts.tmp <- metaDataSubset.df.tmp %>%
+  group_by(stimulationFigures, donorIdFigures) %>%
+  summarise(count = n()) %>%
+  ungroup()
+
+# Define the output file path
+output_file.tmp <- file.path(dataOutputDir, "CD8PosCells.xlsx")
+
+# Save the table to an Excel file
+write.xlsx(cell_counts.tmp, output_file.tmp)
+
+# Create histograms using ggplot2
+histCD8A.tmp <- ggplot(expressionData.tmp, aes(x = CD8A)) +
+  geom_histogram(binwidth = 0.1, fill = "blue", color = "black", alpha = 0.7) +
+  labs(title = "Histogram of CD8A Expression", x = "CD8A Expression", y = "Frequency") +
+  theme_minimal() +
+  theme(text = element_text(size = 16))
+
+histCD8B.tmp <- ggplot(expressionData.tmp, aes(x = CD8B)) +
+  geom_histogram(binwidth = 0.1, fill = "red", color = "black", alpha = 0.7) +
+  labs(title = "Histogram of CD8B Expression", x = "CD8B Expression", y = "Frequency") +
+  theme_minimal() +
+  theme(text = element_text(size = 16))
+
+scatterPlotCD4CD8A.tmp <- ggplot(expressionDataCD8Pos.tmp, aes(x = CD4, y = CD8A)) +
+  geom_point() +
+  labs(title = "Scatterplot of CD8A vs CD4", x = "CD4 Expression", y = "CD8A") +
+  theme_minimal() +
+  theme(text = element_text(size = 16))
+
+scatterPlotCD4CD8B.tmp <- ggplot(expressionDataCD8Pos.tmp, aes(x = CD4, y = CD8B)) +
+  geom_point() +
+  labs(title = "Scatterplot of CD8B vs CD4", x = "CD4 Expression", y = "CD8B") +
+  theme_minimal() +
+  theme(text = element_text(size = 16))
+
+# Print the histograms
+# print(histCD8A.tmp)
+# print(histCD8B.tmp)
+
+# let's remove the CD8 positive cells
+# Identify the cell barcodes to keep
+cellsToKeep.tmp <- setdiff(rownames(seuratQCMergedCleaned@meta.data), nonZeroBarcodes.tmp)
+
+# Subset the @meta.data slot to keep only the rows not in snonZeroBarcodes.tmp
+seuratQCMergedCleaned <- subset(seuratQCMergedCleaned, cells = cellsToKeep.tmp)
+
+
+rm_tmp(ask = FALSE)
+```
+
+```{r removeTCRGenesFromGEXData}
+# we need to remove TCR genes (TRA, TRB, TRD, TRG) so that they don't drive clustering
+# result: none of these genes are present in the RNA assay
+
+# TCRAExpression.tmp <- FetchData(seuratQCMergedCleaned, vars = "TRA")
+# TCRBExpression.tmp <- FetchData(seuratQCMergedCleaned, vars = "TRB")
+# TCRDExpression.tmp <- FetchData(seuratQCMergedCleaned, vars = "TRD")
+# TCRGExpression.tmp <- FetchData(seuratQCMergedCleaned, vars = "TRG")
+
+# rm_tmp(ask = FALSE)
+```
+
 ```{r reProcessCleanedData}
 # Re-run normalization, clustering, UMAP, etc on this subset
 seuratQCMergedCleaned <- JoinLayers(seuratQCMergedCleaned, assay = "RNA")
@@ -1723,103 +1825,6 @@ print("Cluster markers found:")
 print(clusterMarkers[[paste0("RNA_", clusterName[["RNA"]])]])
 ```
 
-```{r CD8CheckAndFilter}
-library(openxlsx)
-# we want to remove cells that are likely to be CD8s
-
-# Extract the expression data for CD8A and CD8B
-CD8AExpression.tmp <- FetchData(seuratQCMergedCleaned, vars = "CD8A")
-CD8BExpression.tmp <- FetchData(seuratQCMergedCleaned, vars = "CD8B")
-
-# Let's also look at CD4
-CD4Expression.tmp <- FetchData(seuratQCMergedCleaned, vars = "CD4")
-
-# Convert the data to a data frame
-expressionData.tmp <- data.frame(
-  CD8A = CD8AExpression.tmp$CD8A,
-  CD8B = CD8BExpression.tmp$CD8B,
-  CD4 = CD4Expression.tmp$CD4
-)
-rownames(expressionData.tmp) <- rownames(CD4Expression.tmp)
-
-# Identify the non-zero entries in CD8A and CD8B
-nonZeroBarcodes.tmp <- rownames(expressionData.tmp)[CD8AExpression.tmp$CD8A != 0 | CD8BExpression.tmp$CD8B != 0]
-# nonZeroBarcodesCD8A.tmp <- rownames(expressionData.tmp)[CD8AExpression.tmp$CD8A != 0]
-# nonZeroBarcodesCD8B.tmp <- rownames(expressionData.tmp)[CD8BExpression.tmp$CD8B != 0]
-
-# make a subset of expressionData.tmp that only has the nonZeroBarcodes.tmp
-expressionDataCD8Pos.tmp <- expressionData.tmp[nonZeroBarcodes.tmp, ]
-
-# Subset seuratQCMergedCleaned@meta.data based on these barcodes
-metaDataSubset.df.tmp <- seuratQCMergedCleaned@meta.data %>%
-  filter(barcode %in% nonZeroBarcodes.tmp)
-
-table(metaDataSubset.df.tmp$stimulationFigures)
-# microbial: 288, IAR: 1, Polyclonal: 12
-
-# Group the data by stimulationFigures and donorIdFigures and count the number of cells
-cell_counts.tmp <- metaDataSubset.df.tmp %>%
-  group_by(stimulationFigures, donorIdFigures) %>%
-  summarise(count = n()) %>%
-  ungroup()
-
-# Define the output file path
-output_file.tmp <- file.path(tableDir, "CD8PosCells.xlsx")
-
-# Save the table to an Excel file
-write.xlsx(cell_counts.tmp, output_file.tmp)
-
-# Create histograms using ggplot2
-histCD8A.tmp <- ggplot(expressionData.tmp, aes(x = CD8A)) +
-  geom_histogram(binwidth = 0.1, fill = "blue", color = "black", alpha = 0.7) +
-  labs(title = "Histogram of CD8A Expression", x = "CD8A Expression", y = "Frequency") +
-  theme_minimal() +
-  theme(text = element_text(size = 16))
-
-histCD8B.tmp <- ggplot(expressionData.tmp, aes(x = CD8B)) +
-  geom_histogram(binwidth = 0.1, fill = "red", color = "black", alpha = 0.7) +
-  labs(title = "Histogram of CD8B Expression", x = "CD8B Expression", y = "Frequency") +
-  theme_minimal() +
-  theme(text = element_text(size = 16))
-
-scatterPlotCD4CD8A.tmp <- ggplot(expressionDataCD8Pos.tmp, aes(x = CD4, y = CD8A)) +
-  geom_point() +
-  labs(title = "Scatterplot of CD8A vs CD4", x = "CD4 Expression", y = "CD8A") +
-  theme_minimal() +
-  theme(text = element_text(size = 16))
-
-scatterPlotCD4CD8B.tmp <- ggplot(expressionDataCD8Pos.tmp, aes(x = CD4, y = CD8B)) +
-  geom_point() +
-  labs(title = "Scatterplot of CD8B vs CD4", x = "CD4 Expression", y = "CD8B") +
-  theme_minimal() +
-  theme(text = element_text(size = 16))
-
-# Print the histograms
-# print(histCD8A.tmp)
-# print(histCD8B.tmp)
-
-# let's remove the CD8 positive cells
-# Identify the cell barcodes to keep
-cellsToKeep.tmp <- setdiff(rownames(seuratQCMergedCleaned@meta.data), nonZeroBarcodes.tmp)
-
-# Subset the @meta.data slot to keep only the rows not in snonZeroBarcodes.tmp
-seuratQCMergedCleaned <- subset(seuratQCMergedCleaned, cells = cellsToKeep.tmp)
-
-
-rm_tmp(ask = FALSE)
-```
-
-```{r removeTCRGenesFromGEXData}
-# we need to remove TCR genes (TRA, TRB, TRD, TRG) so that they don't drive clustering
-# result: none of these genes are present in the RNA assay
-
-# TCRAExpression.tmp <- FetchData(seuratQCMergedCleaned, vars = "TRA")
-# TCRBExpression.tmp <- FetchData(seuratQCMergedCleaned, vars = "TRB")
-# TCRDExpression.tmp <- FetchData(seuratQCMergedCleaned, vars = "TRD")
-# TCRGExpression.tmp <- FetchData(seuratQCMergedCleaned, vars = "TRG")
-
-# rm_tmp(ask = FALSE)
-```
 
 ```{r tcr_detection_plot_QC}
 
@@ -1906,10 +1911,10 @@ library(SeuratDisk)
 SaveH5Seurat(
   seuratQCMergedCleanedV3.tmp,
   filename =
-    file.path(tableDir, "seuratP589AllCells.h5Seurat"),
+    file.path(dataOutputDir, "seuratP589AllCells.h5Seurat"),
   overwrite = TRUE)
 Convert(
-  source = file.path(tableDir, "seuratP589AllCells.h5Seurat"),
+  source = file.path(dataOutputDir, "seuratP589AllCells.h5Seurat"),
   dest = "h5ad",
   assay = "RNA",
   overwrite = TRUE)
@@ -1920,7 +1925,7 @@ rm_tmp(ask = FALSE)
 ```{r loadCellTypistResultsAndAddToSeurat}
 # load in the cellTypist output
 cellTypist.df <-
-  read.csv(file.path(tableDir, "P589_1_Metadata_With_CelltypistPredictions.csv")) %>%
+  read.csv(file.path(dataOutputDir, "P589_1_Metadata_With_CelltypistPredictions.csv")) %>%
   data.frame()
 
 # add cellTypist.df$majority_voting to seuratQCMergedCleaned metadata as $cellTypistCalling
@@ -1970,7 +1975,7 @@ rm_tmp(ask = FALSE)
 
 ```{r stemness}
 # load in the file containing the stemness ML weights
-stemnessWeights <- read_excel(file.path(dataDir,
+stemnessWeights <- read_excel(file.path(dataInputDir,
   "Malta_et_al_2018_SignatureWeights_Machine Learning Identifies Stemness Features Associated with Oncogenic Dedifferentiation_Cell.xlsx"),
 sheet = "mRNAsi")
 
@@ -2279,9 +2284,17 @@ colnames(chainCounts)[1] <- ""
 
 chainCounts <- as.data.frame(chainCounts) # change class from table to dataframe
 write.csv(chainCounts,
-  file.path(tableDir,
+  file.path(dataOutputDir,
     "tcrChainCountsQC.csv"),
   row.names = F)
+```
+
+```{r savePreprocData}
+# save the workspace as an .RData file
+save.image(file.path(dataOutputDir, "preprocData.RData"))
+
+# load the saved image
+load(file.path(dataOutputDir, "preprocData.RData"))
 ```
 
 ```{r downsamplingCEFX}
@@ -2786,7 +2799,7 @@ colnames(chainCounts)[1] <- ""
 
 chainCounts <- as.data.frame(chainCounts) # change class from table to dataframe
 write.csv(chainCounts,
-  file.path(tableDir,
+  file.path(dataOutputDir,
     "tcrChainCountsQCDS.csv"),
   row.names = F)
 ```
@@ -3008,7 +3021,7 @@ hyperParamGrid.df$meanEvalMetric <- rowMeans(hyperParamGrid.df[, c("DBIndexInver
 hyperParamGrid.df <- hyperParamGrid.df %>%
   arrange(nClusters, desc(meanEvalMetric))
 
-write.xlsx(hyperParamGrid.df, file = file.path(tableDir, "20242017_RNA_clustering_hyperParamGrid.xlsx"))
+write.xlsx(hyperParamGrid.df, file = file.path(dataOutputDir, "20242017_RNA_clustering_hyperParamGrid.xlsx"))
 
 # create a subset of hyperParamGrid.df with the best option for each nClusters
 hyperParamGridOptSubset.df <- hyperParamGrid.df %>%
@@ -3108,22 +3121,39 @@ rm_tmp(ask = FALSE)
 # let's do some hyperparameter optimization
 # create grid of hyperparameters to test
 hyperParamGridPCA.df <- expand.grid(
-  findNeighborsDim = c(5, 7, 14, 16, 18, 20),
-  findClustersRes = c(0.01, 0.025, 0.05, 0.75, 0.1, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.8, 1, 1.3, 1.5, 2, 2.5)
+  findNeighborsDim = c(5, 7, 14, 16, 18, 20), # these values were chosen after examining the elbow plot.
+  findClustersRes = c(0.01, 0.025, 0.05, 0.75, 0.1, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.8, 1, 1.3, 1.5, 2, 2.5) # these values were chosen somewhat arbitrarily
 )
 
-min.dist <- c(0.001, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1)
-n_neighbors <- c(5, 20, 30, 40, 50)
-hyperParamUMAP.list <- list(min.dist = min.dist, n_neighbors = n_neighbors)
+# the size of these vectors largely determines the cost of this function in walltime
+min.dist.vector <-  c(0.1, 0.2) # c(0.001, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1)
+n_neighbors.vector <- c(5, 20) # c(5, 20, 30, 40, 50)
 
-optimizeRNAseqClustering <- function(seuratObject, hyperParamGridPCA.df, hyperParamUMAP.list) {
+optimizeRNAseqClustering <- function(seuratObject, hyperParamGridPCA.df, min.dist.vector, n_neighbors.vector, maxNClusters = 10, minNClusters = 1) {
+  # ------------------------------------------------INPUTS------------------------------------------------
+  # seuratObject is... a seurat object
   # hyperParamGridPCA.df is an expanded grid for a full grid search for PCA clustering. type: dataframe
   # hyperParamGridUMAP.list is a list (of lists) of UMAP hyperparameters. type: list
+  # min.dist.vector is a vector of min.dist values to pass to UMAP (via scDEED())
+  # n_neighbors.vector is a vector of n_neighbors values to pass to UMAP (via scDEED())
+  # maxNClusters is the maximum number of clusters to be considered (will evaluate 2 through maxNClusters)
+  #-------------------------------------------------------------------------------------------------------
+
+  #----------------------------------------------OUTPUTS--------------------------------------------------
+  # result contains $hyperParamGridOptClusterAndUMAP.df and $hyperParamGridClusterOnly.df
+  #   Extract like:
+  #     hyperParamGridOptClusterAndUMAP.df <- result$hyperParamGridOptClusterAndUMAP.df (smaller output with opt PCA clustering and UMAP embedding params)
+  #     hyperParamGridClusterOnly.df <- result$hyperParamGridClusterOnly.df (larger output with full PCA clustering gridsearch and results)
+  #--------------------------------------------------------------------------------------------------------
+
+
+  # STEP 1: grid search over FindNeighbors() and FindClusters() hyperparameters to find
+  # the best combinations for each nClusters obtained
 
   # detect nuymber of cores, leave one available for the machine to do other things
   nCores <- parallel::detectCores() - 1
 
-  # create the cluster
+  # create the cluster for parallel computation
   myCluster <- parallel::makeCluster(
     nCores,
     type = "FORK"
@@ -3147,9 +3177,9 @@ optimizeRNAseqClustering <- function(seuratObject, hyperParamGridPCA.df, hyperPa
     metaData.df <- seuratObject@meta.data
 
     # Extract PCA embeddings
-    pca_embeddings <- seuratObject@reductions$pca@cell.embeddings
+    pcaEmbeddings <- seuratObject@reductions$pca@cell.embeddings
 
-    clusterMat <- pca_embeddings
+    clusterMat <- pcaEmbeddings
     clusterVect <- as.numeric(metaData.df$seurat_clusters)
     nClusters <- dim(table(metaData.df$seurat_clusters))
 
@@ -3175,142 +3205,161 @@ optimizeRNAseqClustering <- function(seuratObject, hyperParamGridPCA.df, hyperPa
   clusteringMetrics <- t(clusteringMetrics)
 
   # adding the prediction error column
-  hyperParamGrid.df$DBIndex <- clusteringMetrics[, "DBIndex"]
-  hyperParamGrid.df$CHMetric <- clusteringMetrics[, "CHMetric"]
-  hyperParamGrid.df$medianSilScore <- clusteringMetrics[, "medianSilScore"]
-  hyperParamGrid.df$nClusters <- clusteringMetrics[, "nClusters"]
+  hyperParamGridPCA.df$DBIndex <- clusteringMetrics[, "DBIndex"]
+  hyperParamGridPCA.df$CHMetric <- clusteringMetrics[, "CHMetric"]
+  hyperParamGridPCA.df$medianSilScore <- clusteringMetrics[, "medianSilScore"]
+  hyperParamGridPCA.df$nClusters <- clusteringMetrics[, "nClusters"]
 
   # stop cluster after we're done
   parallel::stopCluster(cl = myCluster)
 
   # scale the clustering metrics to fall between 0 and 1
-  hyperParamGrid.df$DBIndex <- (hyperParamGrid.df$DBIndex - min(hyperParamGrid.df$DBIndex, na.rm = TRUE)) /
-    (max(hyperParamGrid.df$DBIndex, na.rm = TRUE) - min(hyperParamGrid.df$DBIndex, na.rm = TRUE))
+  hyperParamGridPCA.df$DBIndex <- (hyperParamGridPCA.df$DBIndex - min(hyperParamGridPCA.df$DBIndex, na.rm = TRUE)) /
+    (max(hyperParamGridPCA.df$DBIndex, na.rm = TRUE) - min(hyperParamGridPCA.df$DBIndex, na.rm = TRUE))
 
-  hyperParamGrid.df$CHMetric <- (hyperParamGrid.df$CHMetric - min(hyperParamGrid.df$CHMetric, na.rm = TRUE)) /
-    (max(hyperParamGrid.df$CHMetric, na.rm = TRUE) - min(hyperParamGrid.df$CHMetric, na.rm = TRUE))
+  hyperParamGridPCA.df$CHMetric <- (hyperParamGridPCA.df$CHMetric - min(hyperParamGridPCA.df$CHMetric, na.rm = TRUE)) /
+    (max(hyperParamGridPCA.df$CHMetric, na.rm = TRUE) - min(hyperParamGridPCA.df$CHMetric, na.rm = TRUE))
 
-  hyperParamGrid.df$medianSilScore <- (hyperParamGrid.df$medianSilScore - min(hyperParamGrid.df$medianSilScore, na.rm = TRUE)) /
-    (max(hyperParamGrid.df$medianSilScore, na.rm = TRUE) - min(hyperParamGrid.df$medianSilScore, na.rm = TRUE))
+  hyperParamGridPCA.df$medianSilScore <- (hyperParamGridPCA.df$medianSilScore - min(hyperParamGridPCA.df$medianSilScore, na.rm = TRUE)) /
+    (max(hyperParamGridPCA.df$medianSilScore, na.rm = TRUE) - min(hyperParamGridPCA.df$medianSilScore, na.rm = TRUE))
 
   # make an inverse DB score so that it is more easily compared to the other two metrics
   # (small DB is best, but large CH and silscore are best)
-  hyperParamGrid.df$DBIndexInverse <- 1 - hyperParamGrid.df$DBIndex
+  hyperParamGridPCA.df$DBIndexInverse <- 1 - hyperParamGridPCA.df$DBIndex
 
-  # create hyperParamGrid.df$meanEvalMetric, as the mean of $DBIndex, $CHMetric, $medianSilScore
-  hyperParamGrid.df$meanEvalMetric <- rowMeans(hyperParamGrid.df[, c("DBIndexInverse", "CHMetric", "medianSilScore")], na.rm = TRUE)
+  # create hyperParamGridPCA.df$meanEvalMetric, as the mean of $DBIndex, $CHMetric, $medianSilScore
+  hyperParamGridPCA.df$meanEvalMetric <- rowMeans(hyperParamGridPCA.df[, c("DBIndexInverse", "CHMetric", "medianSilScore")], na.rm = TRUE)
 
-  # sort and export the hyperparamgrid
-  hyperParamGrid.df <- hyperParamGrid.df %>%
+  # sort and export (optional) the hyperparamgrid
+  hyperParamGridPCA.df <- hyperParamGridPCA.df %>%
     arrange(nClusters, desc(meanEvalMetric))
 
-  write.xlsx(hyperParamGrid.df, file = file.path(tableDir, "20242017_RNA_clustering_hyperParamGrid.xlsx"))
+  # TODO: wrap this in an if statement to print out a file if the user requests it with a true/false function parameter
+  # write.xlsx(hyperParamGridPCA.df, file = file.path(dataOutputDir, "20242017_RNA_clustering_hyperParamGrid.xlsx"))
 
-  # create a subset of hyperParamGrid.df with the best option for each nClusters
-  hyperParamGridOptSubset.df <- hyperParamGrid.df %>%
+  # create a subset of hyperParamGridPCA.df with the best option for each nClusters
+  hyperParamGridOptSubset.df <- hyperParamGridPCA.df %>%
     group_by(nClusters) %>%
     filter(meanEvalMetric == max(meanEvalMetric)) %>%
     ungroup()
 
+  # Pre-allocate min.dist and n_neighbors columns with NA values
+  hyperParamGridOptSubset.df$min.dist <- NA
+  hyperParamGridOptSubset.df$n_neighbors <- NA
+
+  # STEP 2: use scDEED to optimize the UMAP hyperparameters
   # ---------------------------start of scDEED UMAP opt---------------------------------------
+  # if nrow(hyperParamGridOptSubset.df) is smaller than maxNClusters, then set maxNClusters to nrow(hyperParamGridOptSubset.df)
+  if (nrow(hyperParamGridOptSubset.df) < maxNClusters) {
+    maxNClusters <- nrow(hyperParamGridOptSubset.df)
+  }
 
-  # use scDEED to optimize the UMAP hyperparameters
-  K_ <- 14 # 14 # number of PCs
+  # Loop over the rows of hyperParamGridOptSubset.df, finding the best UMAP embedding for each nClusters
+  for (i in minNClusters:maxNClusters) {
+    # Extract necessary values from hyperParamGridOptSubset.df
+    nClusters <- hyperParamGridOptSubset.df$nClusters[i]
+    numPCs <- hyperParamGridOptSubset.df$findNeighborsDim[i]
+    findClustersRes <- hyperParamGridOptSubset.df$findClustersRes[i]
 
-  scDEEDResult <- scDEED(seuratObject, # input Seurat object (must have UMAP or t-SNE already run)
-    K = K_, # number of PCs
-    reduction.method = "umap", # 'umap' or 'tsne'
-    min.dist =  0.6, # c(0.001, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1), # 0.4, # scDEED default is 0.1 & 0.4; Seurat default is 0.3
-    n_neighbors = 5, # c(5, 20, 30, 40, 50), # 5, # c(5, 20, 30, 40, 50), #scDEED defaults. Seurat default is 30.
-    similarity_percent = 0.5, # default
-    dubious_cutoff = 0.05, # default
-    trustworthy_cutoff = 0.95) # default
+    set.seed(6022)
+    seuratObject <- FindNeighbors(seuratObject, dims = 1:numPCs)
+    seuratObject <- FindClusters(seuratObject, resolution = findClustersRes)
 
-  # add $number_trustworthy_cells and $number_intermediate_cells to scDEEDResult
-  scDEEDResult$full_results$number_trustworthy_cells <- str_count(scDEEDResult$full_results$trustworthy_cells, ",") + 1
-  scDEEDResult$full_results$number_intermediate_cells <- str_count(scDEEDResult$full_results$intermediate_cells, ",") + 1
+    scDEEDResult <- scDEED(seuratObject, # input Seurat object (must have UMAP or t-SNE already run)
+      K = numPCs, # number of PCs
+      reduction.method = "umap", # 'umap' or 'tsne'
+      min.dist =  min.dist.vector, # scDEED default is 0.1 & 0.4; Seurat default is 0.3
+      n_neighbors = n_neighbors.vector, # scDEED defaults are c(5, 20, 30, 40, 50). Seurat default is 30.
+      similarity_percent = 0.5, # scDEECD default
+      dubious_cutoff = 0.05, # scDEED default
+      trustworthy_cutoff = 0.95) # scDEED default
 
-  # utilizing scDEED output
-  min(scDEEDResult$num_dubious$number_dubious_cells) # 437 # 26 with opt
-  opt <- which(scDEEDResult$num_dubious$number_dubious_cells == min(scDEEDResult$num_dubious$number_dubious_cells))
-  m <- scDEEDResult$num_dubious$min.dist[opt] # 0.1 # 0.3 #0.5
-  n <- scDEEDResult$num_dubious$n_neighbors[opt] # 30 (only value tested) # 5 #5
+    # add $number_trustworthy_cells and $number_intermediate_cells to scDEEDResult
+    scDEEDResult$full_results$number_trustworthy_cells <- str_count(scDEEDResult$full_results$trustworthy_cells, ",") + 1
+    scDEEDResult$full_results$number_intermediate_cells <- str_count(scDEEDResult$full_results$intermediate_cells, ",") + 1
 
-  dubious_cells <- scDEEDResult$full_results$dubious_cells[opt]
-  dubious_cells <- as.numeric(strsplit(dubious_cells, ",")[[1]])
-  trustworthy_cells <- scDEEDResult$full_results$trustworthy_cells[opt]
-  trustworthy_cells <- as.numeric(strsplit(trustworthy_cells, ",")[[1]])
-  set.seed(6022)
-  seuratObject <- RunUMAP(seuratObject,
-    dims = 1:K_,
-    min.dist = m,
-    n.neighbors = n)
-  # seed.use = 100)
+    # utile scDEED output
+    optIdx <- which(scDEEDResult$num_dubious$number_dubious_cells == min(scDEEDResult$num_dubious$number_dubious_cells)) # find the result with the fewest 'dubiously' embedded cells
+    # min.distOpt <- scDEEDResult$num_dubious$min.dist[optIdx]
+    # n_neighborsOpt <- scDEEDResult$num_dubious$n_neighbors[optIdx]
 
-  # match up the dubious/trustworthy lists with the seurat data
-  rownames_seurat <- rownames(seuratObject@meta.data)
-  rownames_dubious <- rownames_seurat[dubious_cells]
-  rownames_trustworthy <- rownames_seurat[trustworthy_cells]
+    # just output the optimal hyperparams into hyperParamGridOptSubset.df
+    hyperParamGridOptSubset.df$min.dist[i] <- scDEEDResult$num_dubious$min.dist[optIdx]
+    hyperParamGridOptSubset.df$n_neighbors[i] <- scDEEDResult$num_dubious$n_neighbors[optIdx]
+  }
 
-  designation <- rep("intermediate", length(rownames_seurat))
+  # Reorder columns to place min.dist and n_neighbors after findClustersRes
+  hyperParamGridOptSubset.df <- hyperParamGridOptSubset.df %>%
+    dplyr::select(findNeighborsDim, findClustersRes, min.dist, n_neighbors, everything())
 
-  designation[rownames_seurat %in% rownames_dubious] <- "dubious"
-  designation[rownames_seurat %in% rownames_trustworthy] <- "trustworthy"
-
-  seuratObject@meta.data$designation <- designation
-
-  #-------------------------------end of scDEED UMAP opt--------------------------------------------------------
-
-  set.seed(6022)
-  seuratObject <- FindNeighbors(seuratObject, dims = 1:14) # 14
-  seuratObject <- FindClusters(seuratObject, resolution = 0.25) # 0.4)
-
-  set.seed(6022)
-  seuratObject <- RunUMAP(object = seuratObject, reduction = "pca",
-    reduction.key = "test_",
-    dims = 1:14,
-    n.neighbors = 5, # 30
-    min.dist = 0.6) # 0.1
-
-  # store cluster info in seurat object metadata
-  # Initialize clusterName and clusterMarkers
-  clusterName <- character()
-  clusterMarkers <- list()
-
-  # Create the cluster name for RNA
-  clusterName[["RNA"]] <- paste0("seurat_clusters_RNA_", str_replace(clusterResolution[["RNA"]], "\\.", "p"))
-
-  # Add metadata to the Seurat object
-  seuratObject <- seuratObject %>%
-    AddMetaData(Idents(seuratObject), col.name = clusterName[["RNA"]])
-
-  # Set the identifiers
-  Idents(seuratObject) <- seuratObject@meta.data[[clusterName[["RNA"]]]]
-
-  # Ensure data layers are joined
-  seuratObject <- JoinLayers(seuratObject)
-
-  # Perform the FindAllMarkers function and store the results in clusterMarkers
-  clusterMarkers[[paste0("RNA_", clusterName[["RNA"]])]] <-
-    FindAllMarkers(seuratObject, assay = "RNA")
-
-  palRNAClusters <-
-    big_colorblind_pal(
-      n_distinct(seuratObject@meta.data[[clusterName[["RNA"]]]]),
-      shuffle_colors = TRUE,
-      drop_yellow = TRUE, drop_black = TRUE) %>%
-    setNames(sort(unique(seuratObject@meta.data[[clusterName[["RNA"]]]])))
-
-  # Get the number of distinct RNA clusters
-  num_clusters <- n_distinct(seuratObject@meta.data[[clusterName[["RNA"]]]])
-
-  # Get the "ggsci::uniform_startrek" palette and adjust it
-  palRNAClusters <- paletteer_d("khroma::okabeitoblack", n = num_clusters) %>%
-    sample() %>%  # Shuffle colors
-    .[!grepl("yellow|black", .)] %>%  # Drop yellow and black colors
-    setNames(sort(unique(seuratObject@meta.data[[clusterName[["RNA"]]]])))
-
+  # Return the hyperparam dataframes
+  return(list(hyperParamGridOptClusterAndUMAP.df = hyperParamGridOptSubset.df, hyperParamGridClusterOnly.df = hyperParamGridPCA.df))
 }
+
+# ---------------------chunk cut out of function for now (adds umap embeddings to meta.data)-------------------------------------------
+# set.seed(6022)
+# seuratObject <- RunUMAP(seuratObject,
+#                         dims = 1:numPCs,
+#                         min.dist = min.distOpt[1],
+#                         n.neighbors = n_neighborsOpt[1])
+# seed.use = 100)
+#-------------------------------end of scDEED UMAP opt--------------------------------------------------------
+
+# Note 20241205: commenting out this chunk in favor of just passing back the optimal params. The Seurat object can be reprocessed manually for each nCluster that we want to look at.
+# # store cluster info in seurat object metadata
+# # Initialize clusterName and clusterMarkers
+# clusterName <- character()
+# clusterMarkers <- list()
+
+# # Create the cluster name for RNA
+# clusterName <- paste0("seurat", as.character(nClusters), "Clusters")
+
+# # Add metadata to the Seurat object
+# seuratObject <- seuratObject %>%
+#   AddMetaData(Idents(seuratObject), col.name = clusterName)
+
+# # Set the identifiers
+# Idents(seuratObject) <- seuratObject@meta.data[[clusterName]]
+
+# # Ensure data layers are joined (note: tried moving this outside of the loop, and it broke everything. TODO: investigate)
+# seuratObject <- JoinLayers(seuratObject)
+
+# # Store the UMAP embeddings in the meta.data (we'll have to use ggplot rather than dimPlot and etc later.)
+# # First extract the embeddings
+# UMAPEmbeddings <- seuratObject@reductions$umap@cell.embeddings
+
+# # Create dynamic column names for the UMAP coordinates
+# colname_UMAP1 <- paste0("UMAP1_", nClusters, "Clusters")
+# colname_UMAP2 <- paste0("UMAP2_", nClusters, "Clusters")
+
+# # Store the UMAP coordinates in these columns
+# seuratObject@meta.data[[colname_UMAP1]] <- UMAPEmbeddings[, 1]
+# seuratObject@meta.data[[colname_UMAP2]] <- UMAPEmbeddings[, 2]
+# ------------------------------------------------------------------------------------------------------------
+
+# testing
+seuratObject <- seuratTreg
+startTime <- Sys.time()
+
+result <- optimizeRNAseqClustering(seuratObject,
+  hyperParamGridPCA.df,
+  min.dist.vector,
+  n_neighbors.vector,
+  maxNClusters = 6)
+
+endTime <- Sys.time()
+timeElapsed <- endTime - startTime
+print(timeElapsed)
+
+# Extract the data frames from the result
+hyperParamGridOptClusterAndUMAP.df <- result$hyperParamGridOptClusterAndUMAP.df
+hyperParamGridClusterOnly.df <- result$hyperParamGridClusterOnly.df
+```
+
+```{r saveOptClusteringOutputs}
+# save Treg Only files
+write.xlsx(hyperParamGridClusterOnly.df, file.path(dataOutputDir, "20241205_RNAClusteringPCATregOnly.xlsx"))
+write.xlsx(hyperParamGridOptClusterAndUMAP.df, file.path(dataOutputDir, "20241205_RNAClusteringPCAAndUMAPTregOnly.xlsx"))
 ```
 
 ```{r hierarchicalClusteringAnalysis}
@@ -3892,7 +3941,7 @@ topMarkers %>%
     position = "left") %>%
   scroll_box(height = "900px")
 
-# write.csv(topMarkers, file.path(tableDir, "top10_genes_per_cluster_downsampled.csv"), quote = FALSE, row.names = TRUE)
+# write.csv(topMarkers, file.path(dataOutputDir, "top10_genes_per_cluster_downsampled.csv"), quote = FALSE, row.names = TRUE)
 ```
 
 ```{r clusterDefiningGenesDotPlot}
@@ -4049,7 +4098,7 @@ topMarkers %>%
     position = "left") %>%
   scroll_box(height = "900px")
 
-write.csv(topMarkers, file.path(tableDir, "top50_cluster_defining_genes_per_cluster_downsampled.csv"), quote = FALSE, row.names = TRUE)
+write.csv(topMarkers, file.path(dataOutputDir, "top50_cluster_defining_genes_per_cluster_downsampled.csv"), quote = FALSE, row.names = TRUE)
 
 top50Markers <- topMarkers
 ```
@@ -4118,7 +4167,7 @@ topMarkers %>%
     position = "left") %>%
   scroll_box(height = "900px")
 
-write.csv(topMarkers, file.path(tableDir, "cluster_defining_genes_per_cluster_downsampled.csv"), quote = FALSE, row.names = TRUE)
+write.csv(topMarkers, file.path(dataOutputDir, "cluster_defining_genes_per_cluster_downsampled.csv"), quote = FALSE, row.names = TRUE)
 ```
 
 ```{r setHTAsColumnDS}
@@ -5989,8 +6038,8 @@ cellsTreg <- gated_data_3$HT_names
 
 ```{r CITEseqMarkerScatterPlotsStimulationSplit_forGating_logNorm_noDownsample_densityPlot}
 # set plot sizes
-plotHeight <- 6
-plotWidth <- 6
+plotHeight <- 2
+plotWidth <- 4
 # Extract the data for the markers
 markers <- rownames(seuratQCMergedCleaned@assays$FB@data)
 data <- as.data.frame(t(seuratQCMergedCleaned@assays$FB@data[markers, ]))
@@ -7665,7 +7714,7 @@ combined_table <- bind_rows(table_treg, table_tconv)
 print(combined_table)
 
 # Define the output file path
-output_file <- file.path(tableDir, "totalSeqTregTconvCountsPerDonorStimulationNoDownsample.xlsx")
+output_file <- file.path(dataOutputDir, "totalSeqTregTconvCountsPerDonorStimulationNoDownsample.xlsx")
 
 # Save the combined_table to an Excel file
 write.xlsx(combined_table, output_file)
@@ -7701,7 +7750,7 @@ combined_table <- bind_rows(table_treg, table_tconv)
 print(combined_table)
 
 # Define the output file path
-output_file <- file.path(tableDir, "totalSeqTregTconvCountsPerDonorStimulationNoDownsampleDSB.xlsx")
+output_file <- file.path(dataOutputDir, "totalSeqTregTconvCountsPerDonorStimulationNoDownsampleDSB.xlsx")
 
 # Save the combined_table to an Excel file
 write.xlsx(combined_table, output_file)
@@ -8822,118 +8871,40 @@ width = 6)
 print(elbowPlot.tmp)
 
 dev.off()
-# rm_tmp(ask = FALSE)
+rm_tmp(ask = FALSE)
 
 # let's do some hyperparameter optimization
 # create grid of hyperparameters to test
-hyperParamGrid.df <- expand.grid(
+hyperParamGridPCA.df <- expand.grid(
   findNeighborsDim = c(5, 7, 14, 16, 18, 20),
   findClustersRes = c(0.01, 0.025, 0.05, 0.75, 0.1, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.8, 1, 1.3, 1.5, 2, 2.5)
 )
 
-# hyperParamGrid.df <- expand.grid(
-#   findNeighborsDim = c(5, 2),
-#   findClustersRes = c(0.01, 1)
-# )
+# the size of these vectors largely determines the cost of this function in walltime
+min.dist.vector <-  c(0.001, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1)
+n_neighbors.vector <- c(5, 20, 30, 40, 50)
 
-# detect nuymber of cores, leave one available for the machine to do other things
-nCores <- parallel::detectCores() - 1
+startTime <- Sys.time()
 
-# create the cluster
-myCluster <- parallel::makeCluster(
-  nCores,
-  type = "FORK"
-)
+resultTreg <- optimizeRNAseqClustering(seuratTreg,
+  hyperParamGridPCA.df,
+  min.dist.vector,
+  n_neighbors.vector,
+  maxNClusters = 6)
 
-# check the cluster definition (optional)
-print(myCluster)
+endTime <- Sys.time()
+timeElapsed <- endTime - startTime
+print(timeElapsed)
 
-# register it to be used by %dopar%
-doParallel::registerDoParallel(cl = myCluster)
+# Extract the data frames from the result
+hyperParamGridOptClusterAndUMAP.df <- resultTreg$hyperParamGridOptClusterAndUMAP.df
+hyperParamGridClusterOnly.df <- resultTreg$hyperParamGridClusterOnly.df
 
-# check if it is registered (optional)
-foreach::getDoParRegistered()
-
-# how many workers are available? (optional)
-foreach::getDoParWorkers()
-
-# Hyperparameter grid search
-clusteringMetrics <- foreach(
-  findNeighborsDim = hyperParamGrid.df$findNeighborsDim,
-  findClustersRes = hyperParamGrid.df$findClustersRes,
-  .combine = "cbind"
-) %dopar% {
-  # do the UMAP clustering on the Seurat object
-  set.seed(6022)
-  seuratTreg <- FindNeighbors(seuratTreg, dims = 1:findNeighborsDim, verbose = FALSE)
-  seuratTreg <- FindClusters(seuratTreg, resolution = findClustersRes, verbose = FALSE)
-
-  # extract the cluster information
-  metaData.df <- seuratTreg@meta.data
-
-  # Extract PCA embeddings
-  pca_embeddings <- seuratTreg@reductions$pca@cell.embeddings
-
-  clusterMat <- pca_embeddings
-  clusterVect <- as.numeric(metaData.df$seurat_clusters)
-  nClusters <- dim(table(metaData.df$seurat_clusters))
-
-  # calculate clustering metrics
-  daviesBouldinIdx <- index.DB(clusterMat, clusterVect)
-  calinskiHarabasz <- index.G1(clusterMat, clusterVect)
-  silScore <- silhouette(clusterVect, dist(clusterMat))
-  if (anyNA(silScore)) { # this is gross and clumsy, but hey, we'll fix it later
-    medianSilScore <- NaN
-  } else {
-    silScoreSummary <- summary(silScore)
-    medianSilScore <- silScoreSummary$si.summary["Median"]
-  }
-
-  clusteringMetrics <- c("nClusters" = nClusters,
-    "DBIndex" = daviesBouldinIdx$DB,
-    "CHMetric" = calinskiHarabasz,
-    "medianSilScore" = medianSilScore)
-  return(clusteringMetrics)
-}
-
-# transpose the result
-clusteringMetrics <- t(clusteringMetrics)
-
-# adding the prediction error column
-hyperParamGrid.df$DBIndex <- clusteringMetrics[, "DBIndex"]
-hyperParamGrid.df$CHMetric <- clusteringMetrics[, "CHMetric"]
-hyperParamGrid.df$medianSilScore <- clusteringMetrics[, "medianSilScore"]
-hyperParamGrid.df$nClusters <- clusteringMetrics[, "nClusters"]
-
-# stop cluster after we're done
-parallel::stopCluster(cl = myCluster)
-
-# scale the clustering metrics to fall between 0 and 1
-hyperParamGrid.df$DBIndex <- (hyperParamGrid.df$DBIndex - min(hyperParamGrid.df$DBIndex, na.rm = T)) /
-  (max(hyperParamGrid.df$DBIndex, na.rm = T) - min(hyperParamGrid.df$DBIndex, na.rm = T))
-
-hyperParamGrid.df$CHMetric <- (hyperParamGrid.df$CHMetric - min(hyperParamGrid.df$CHMetric, na.rm = T)) /
-  (max(hyperParamGrid.df$CHMetric, na.rm = T) - min(hyperParamGrid.df$CHMetric, na.rm = T))
-
-hyperParamGrid.df$medianSilScore <- (hyperParamGrid.df$medianSilScore - min(hyperParamGrid.df$medianSilScore, na.rm = T)) /
-  (max(hyperParamGrid.df$medianSilScore, na.rm = T) - min(hyperParamGrid.df$medianSilScore, na.rm = T))
-
-# make an inverse DB score so that it is more easily compared to the other two metrics
-# (small DB is best, but large CH and silscore are best)
-hyperParamGrid.df$DBIndexInverse <- 1 - hyperParamGrid.df$DBIndex
-
-# create hyperParamGrid.df$meanEvalMetric, as the mean of $DBIndex, $CHMetric, $medianSilScore
-hyperParamGrid.df$meanEvalMetric <- rowMeans(hyperParamGrid.df[, c("DBIndexInverse", "CHMetric", "medianSilScore")], na.rm = TRUE)
-
-# sort and export the hyperparamgrid
-hyperParamGrid.df <- hyperParamGrid.df %>%
-  arrange(nClusters, desc(meanEvalMetric))
-
-write.xlsx(hyperParamGrid.df, file = file.path(tableDir, "20241127_RNA_clustering_TregOnly_hyperParamGrid.xlsx"))
+write.xlsx(hyperParamGridOptClusterAndUMAP.df, file = file.path(dataOutputDir, "20241210_RNA_clustering_TregOnly_hyperParamGrid.xlsx"))
 
 set.seed(6022)
-seuratTreg <- FindNeighbors(seuratTreg, dims = 1:20)
-seuratTreg <- FindClusters(seuratTreg, resolution = 0.05)
+seuratTreg <- FindNeighbors(seuratTreg, dims = 1:16)
+seuratTreg <- FindClusters(seuratTreg, resolution = 0.6)
 
 
 # Optimize UMAP hyperparameters with scDEED
@@ -8994,9 +8965,9 @@ SeuratUMAPscDEEDOpt@meta.data$designation <- designation
 set.seed(6022)
 seuratTreg <- RunUMAP(object = seuratTreg,
   reduction = "pca",
-  dims = 1:20,
+  dims = 1:16,
   n.neighbors = 5, # 30
-  min.dist = 0.6) # 0.1
+  min.dist = 0.7) # 0.1
 
 # store cluster info in seurat object metadata
 # Initialize clusterName and clusterMarkers
@@ -9041,6 +9012,124 @@ palRNAClusters <- paletteer_d("khroma::okabeitoblack", n = num_clusters) %>%
   setNames(sort(unique(seuratTreg@meta.data[[clusterName[["RNA"]]]])))
 
 # rm_tmp(ask = FALSE)
+```
+
+```{r clusterTconvSeparately}
+# make a subset seurat object that only contains the cells where $cellType == "Treg"
+seuratTconv <- subset(seuratQCMergedCleanedDS, subset = cellType == "Tconv")
+
+# now subset down to the cells in RNAseq clusters 3 and 4
+seuratTconv <- subset(seuratQCMergedCleanedDS, subset = seurat_clusters %in% c("0", "1", "2", "5", "6"))
+
+# save old clusters
+seuratTconv@meta.data$seuratClustersAllCellsDS <- seuratTconv@meta.data$seurat_clusters
+
+# Re-run normalization, clustering, UMAP, etc on this subset
+DefaultAssay(seuratTconv) <- "RNA"
+seuratTconv <- SeuratObject::JoinLayers(seuratTconv, layers = c("RNA"))
+seuratTconv <- NormalizeData(object = seuratTconv,
+  verbose = FALSE,
+  normalization.method = "LogNormalize",
+  margin = 2,
+  assay = "FB")
+
+seuratTconv <- NormalizeData(object = seuratTconv,
+  verbose = FALSE,
+  normalization.method = "LogNormalize",
+  margin = 2,
+  assay = "HT")
+
+# seuratTconv <- NormalizeData(object = seuratTconv, verbose = FALSE)
+seuratTconv <- FindVariableFeatures(object = seuratTconv,
+  selection.method = "vst", nfeatures = 2000, verbose = FALSE)
+
+seuratTconv <- ScaleData(object = seuratTconv, verbose = FALSE)
+seuratTconv <- RunPCA(object = seuratTconv, npcs = 30, verbose = FALSE)
+
+# Elbow plot
+elbowPlot.tmp <- ElbowPlot(seuratTconv)
+
+pdf(file.path(plotDir,
+  paste0(filenameSuffix, "_elbowPlotUMAP.pdf")),
+height = 5,
+width = 6)
+
+print(elbowPlot.tmp)
+
+dev.off()
+rm_tmp(ask = FALSE)
+
+# let's do some hyperparameter optimization
+# create grid of hyperparameters to test
+hyperParamGridPCA.df <- expand.grid(
+  findNeighborsDim = c(5, 8, 12, 14, 20), # these values were chosen after examining the elbow plot.
+  findClustersRes = c(0.01, 0.025, 0.05, 0.75, 0.1, 0.2, 0.25, 0.3, 0.35, 0.4, 0.5, 0.6, 0.8, 1, 1.3, 1.5, 2, 2.5) # these values were chosen somewhat arbitrarily
+)
+
+# the size of these vectors largely determines the cost of this function in walltime
+min.dist.vector <-  c(0.001, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1)
+n_neighbors.vector <- c(5, 20, 30, 40, 50)
+
+# testing
+startTime <- Sys.time()
+
+resultTconv <- optimizeRNAseqClustering(seuratTconv,
+  hyperParamGridPCA.df,
+  min.dist.vector,
+  n_neighbors.vector,
+  maxNClusters = 10,
+  minNClusters = 5) # because we're starting with 5
+
+endTime <- Sys.time()
+timeElapsed <- endTime - startTime
+print(timeElapsed)
+
+# Extract the data frames from the result
+hyperParamGridOptClusterAndUMAP.df <- resultTconv$hyperParamGridOptClusterAndUMAP.df
+hyperParamGridClusterOnly.df <- resultTconv$hyperParamGridClusterOnly.df
+
+write.xlsx(hyperParamGridOptClusterAndUMAP.df, file = file.path(dataOutputDir, "20241210_RNA_clustering_TconvOnly_hyperParamGrid.xlsx"))
+
+# TODO automate
+# process Tconv cells for each different nCluster of interest
+set.seed(6022)
+seuratTconv <- FindNeighbors(seuratTconv, dims = 1:12)
+seuratTconv <- FindClusters(seuratTconv, resolution = 0.8)
+
+set.seed(6022)
+seuratTconv <- RunUMAP(object = seuratTconv, reduction = "pca",
+  # reduction.key = "umap",
+  dims = 1:12,
+  n.neighbors = 50,
+  min.dist = 0.2)
+
+
+# store cluster info in seurat object metadata
+# Initialize clusterName and clusterMarkers
+clusterName <- character()
+clusterMarkers <- list()
+
+# Create the cluster name for RNA
+clusterName <- paste0("seurat_clusters_Tconv")
+
+# Add metadata to the Seurat object
+seuratTconv <- seuratTconv %>%
+  AddMetaData(Idents(seuratTconv), col.name = clusterName)
+
+# Set the identifiers
+Idents(seuratTconv) <- seuratTconv@meta.data[[clusterName]]
+
+# Ensure data layers are joined
+seuratTconv <- JoinLayers(seuratTconv)
+
+# Get the number of distinct RNA clusters
+num_clusters <- n_distinct(seuratTconv@meta.data[[clusterName]])
+
+# Get the "ggsci::uniform_startrek" palette and adjust it
+palRNAClusters <- paletteer_d("basetheme::royal", n = num_clusters) %>% # paletteer_d("khroma::okabeitoblack", n = num_clusters) %>%
+  sample() %>%  # Shuffle colors
+  .[!grepl("yellow|black", .)] %>%  # Drop yellow and black colors
+  setNames(sort(unique(seuratTconv@meta.data[[clusterName]])))
 ```
 
 ```{r lookAtClustersTregs}
@@ -9256,7 +9345,7 @@ topMarkers %>%
     position = "left") %>%
   scroll_box(height = "900px")
 
-write.csv(topMarkers, file.path(tableDir, "top10_genes_per_cluster_downsampled_Treg.csv"), quote = FALSE, row.names = TRUE)
+write.csv(topMarkers, file.path(dataOutputDir, "top10_genes_per_cluster_downsampled_Treg.csv"), quote = FALSE, row.names = TRUE)
 ```
 
 ```{r clusterDefiningGenesDotPlot}
@@ -9286,6 +9375,614 @@ dev.off()
 
 rm_tmp(ask = FALSE)
 ```
+
+```{r showstemnessScoreOnUMAPTregOnly}
+pdf(file.path(plotDir,
+  paste0(filenameSuffix, "_UMAP_RNA_stemnessScore_TregOnly.pdf")),
+height = 6,
+width = 12)
+
+FeaturePlot(object = seuratTreg,
+  features = "stemnessScore",
+  reduction = "umap",
+  pt.size = 1) +
+  scale_color_viridis_c() +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "stemnessScore", title = "") +
+  theme(aspect.ratio = 1)
+#   facet_wrap(~seurat_clusters)
+
+dev.off()
+
+# Ensure 'seurat_clusters' exists, then proceed with plotting
+pdf(file.path(plotDir, paste0(filenameSuffix, "_UMAP_RNA_stimulationFacetTregOnly.pdf")), height = 5.5, width = 10)
+
+# Extract UMAP data
+umap_data <- Embeddings(seuratTreg, "umap")
+
+# Name the columns of umap_data explicitly to match expected names in ggplot
+colnames(umap_data) <- c("UMAP_1", "UMAP_2")
+
+# Convert umap_data to a data frame
+umap_data_df <- as.data.frame(umap_data)
+
+# Add row names as a new column for merging
+umap_data_df$cells <- rownames(umap_data_df)
+
+# Ensure metadata has a column to merge on, typically cell names
+metadata <- seuratTreg@meta.data
+metadata$cells <- rownames(metadata)
+
+# Combine UMAP data with metadata for plotting
+plot_data <- merge(umap_data_df, metadata, by = "cells")
+
+# Use ggplot for plotting to manually handle facets and colors
+p <- ggplot(plot_data, aes(x = UMAP_1, y = UMAP_2, color = stemnessScore)) +
+  geom_point(size = 1) +
+  scale_color_viridis_c() +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "stemnessScore", title = "") +
+  theme(aspect.ratio = 1) +
+  facet_wrap(~stimulationFigures) # Now using the combined data
+
+print(p)
+dev.off()
+```
+
+```{r makeAirlinePlotTregOnly}
+# -------------------all three stimulations---------------------------------
+# Extract the cdr3CloneID column from the metadata
+cdr3CloneIDs <- seuratTreg@meta.data$cdr3CloneID
+
+# Count the occurrences of each cdr3CloneID
+cdr3CloneID_counts <- table(cdr3CloneIDs)
+
+# Filter the IDs that have 3 or more occurrences
+cdr3CloneID_filtered <- names(cdr3CloneID_counts[cdr3CloneID_counts >= 2])
+
+# Print the filtered cdr3CloneID names
+# print(cdr3CloneID_filtered)
+airlinePlot(seuratTreg,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences",
+  plotName = "AirlinePlotAllStimTregOnly4Clust")
+
+airlinePlotDonorId(seuratTreg,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences",
+  plotName = "AirlinePlotAllStimTregOnly4ClustDonorId")
+
+# --------------------------------------------------------------------------
+
+# -----------------------------------IAR------------------------------------
+# make subset Seurat object
+seurat_subset.tmp <- subset(seuratTreg, subset = stimulationFigures == "IAR")
+
+# Extract the cdr3CloneID column from the metadata
+cdr3CloneIDs <- seurat_subset.tmp@meta.data$cdr3CloneID
+
+# Count the occurrences of each cdr3CloneID
+cdr3CloneID_counts <- table(cdr3CloneIDs)
+
+# Filter the IDs that have 3 or more occurrences
+cdr3CloneID_filtered <- names(cdr3CloneID_counts[cdr3CloneID_counts >= 2])
+
+# Print the filtered cdr3CloneID names
+print(cdr3CloneID_filtered)
+
+airlinePlot(seurat_subset.tmp,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences\nIAR",
+  plotName = "AirlinePlotIARTregOnly4ClustIAR")
+
+airlinePlotDonorId(seurat_subset.tmp,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences\nIAR",
+  plotName = "AirlinePlotIARTregOnly4ClustIARDonorId")
+
+rm_tmp(ask = FALSE)
+# --------------------------------------------------------------------------
+
+# -----------------------------------Microbial------------------------------------
+# make subset Seurat object
+seurat_subset.tmp <- subset(seuratTreg, subset = stimulationFigures == "Microbial")
+
+# Extract the cdr3CloneID column from the metadata
+cdr3CloneIDs <- seurat_subset.tmp@meta.data$cdr3CloneID
+
+# Count the occurrences of each cdr3CloneID
+cdr3CloneID_counts <- table(cdr3CloneIDs)
+
+# Filter the IDs that have 3 or more occurrences
+cdr3CloneID_filtered <- names(cdr3CloneID_counts[cdr3CloneID_counts >= 2])
+
+# Print the filtered cdr3CloneID names
+print(cdr3CloneID_filtered)
+
+airlinePlot(seurat_subset.tmp,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences\nMicrobial/CEFX",
+  plotName = "AirlinePlotIARTregOnly4ClustMicrobial")
+
+airlinePlotDonorId(seurat_subset.tmp,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences\nMicrobial/CEFX",
+  plotName = "AirlinePlotIARTregOnly4ClustMicrobialDonorId")
+
+rm_tmp(ask = FALSE)
+# --------------------------------------------------------------------------
+
+# -----------------------------------Polyclonal------------------------------------
+# make subset Seurat object
+seurat_subset.tmp <- subset(seuratTreg, subset = stimulationFigures == "Polyclonal")
+
+# Extract the cdr3CloneID column from the metadata
+cdr3CloneIDs <- seurat_subset.tmp@meta.data$cdr3CloneID
+
+# Count the occurrences of each cdr3CloneID
+cdr3CloneID_counts <- table(cdr3CloneIDs)
+
+# Filter the IDs that have 3 or more occurrences
+cdr3CloneID_filtered <- names(cdr3CloneID_counts[cdr3CloneID_counts >= 2])
+
+# Print the filtered cdr3CloneID names
+print(cdr3CloneID_filtered)
+
+airlinePlot(seurat_subset.tmp,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences\nPolyclonal",
+  plotName = "AirlinePlotIARTregOnly4ClustPolyclonal")
+
+airlinePlotDonorId(seurat_subset.tmp,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences\nPolyclonal",
+  plotName = "AirlinePlotIARTregOnly4ClustPolyclonalDonorId")
+
+rm_tmp(ask = FALSE)
+# --------------------------------------------------------------------------
+```
+
+### Tconv only analysis
+
+```{r lookAtClustersTconvs}
+
+nClust <- length(table(seuratTconv@meta.data$seurat_clusters))
+nClustString <- paste0("_", as.character(nClust), "Clusters")
+
+pdf(file.path(plotDir,
+  paste0(filenameSuffix, nClustString, "_UMAP_RNA_TconvOnly.pdf")),
+height = 6,
+width = 10)
+
+DimPlot(object = seuratTconv,
+  reduction = "umap",
+  group = "seurat_clusters",
+  pt.size = 1) +
+  scale_color_manual(values = palRNAClusters) +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster", title = "") +
+  theme(aspect.ratio = 1) #+
+#   facet_wrap(~seurat_clusters)
+
+dev.off()
+
+pdf(file.path(plotDir,
+  paste0(filenameSuffix, nClustString, "_UMAP_RNA_clusterFacet_TconvOnly.pdf")),
+height = 6,
+width = 10)
+
+DimPlot(object = seuratTconv,
+  reduction = "umap",
+  group = "seurat_clusters",
+  pt.size = 1) +
+  scale_color_manual(values = palRNAClusters) +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster", title = "") +
+  theme(aspect.ratio = 1) +
+  facet_wrap(~seurat_clusters)
+
+dev.off()
+
+# Extract UMAP coordinates and metadata
+umap_data <- as.data.frame(seuratTconv@reductions$umap@cell.embeddings)
+umap_data$seurat_clusters <- seuratTconv@meta.data$seurat_clusters
+umap_data$stimulationFigures <- seuratTconv@meta.data$stimulationFigures
+
+# Create the plot
+pdf(file.path(plotDir,
+  paste0(filenameSuffix, nClustString, "_UMAP_RNA_stimulationFacet_TconvOnly.pdf")),
+height = 6,
+width = 10)
+
+ggplot(umap_data, aes(x = umap_1, y = umap_2, color = seurat_clusters)) +
+  geom_point(size = 1) +
+  scale_color_manual(values = palRNAClusters) +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster", title = "") +
+  theme(aspect.ratio = 1, legend.position = "none") +
+  facet_wrap(~stimulationFigures)
+
+dev.off()
+```
+
+```{r clusterProportionPlotsWithCellTypeCalls}
+nClust <- length(table(seuratTconv@meta.data$seurat_clusters))
+nClustString <- paste0("_", as.character(nClust), "Clusters")
+
+# Ensure the variables are factors
+seuratTconv@meta.data$studyGroup <- as.factor(seuratTconv@meta.data$studyGroup)
+seuratTconv@meta.data$stimulationFigures <- as.factor(seuratTconv@meta.data$stimulationFigures)
+seuratTconv@meta.data$donorIdFigures <- as.factor(seuratTconv@meta.data$donorIdFigures)
+seuratTconv@meta.data$seurat_clusters <- as.factor(seuratTconv@meta.data$seurat_clusters)
+seuratTconv@meta.data$seuratClustersAllCellsDS <- as.factor(seuratTconv@meta.data$seuratClustersAllCellsDS)
+seuratTconv@meta.data$cellType <- as.factor(seuratTconv$cellType)
+seuratTconv@meta.data$cellTypistCalling <- as.factor(seuratTconv$cellTypistCalling)
+
+# Extract metadata
+metadata.tmp <- seuratTconv@meta.data
+
+# all together now
+# Create the three plots
+plot1.tmp <- ggplot(metadata.tmp, aes(x = seurat_clusters, fill = studyGroup)) +
+  geom_bar(position = "fill") +
+  labs(x = "Seurat Clusters", y = "Proportion", fill = "Study Group") +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+    axis.title.x = element_blank())
+
+plot2.tmp <- ggplot(metadata.tmp, aes(x = seurat_clusters, fill = stimulationFigures)) +
+  geom_bar(position = "fill") +
+  labs(x = "Seurat Clusters", y = "Proportion", fill = "Stimulation") +
+  scale_fill_manual(values = palStimulation) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+    axis.title.x = element_blank())
+
+plot3.tmp <- ggplot(metadata.tmp, aes(x = seurat_clusters, fill = donorIdFigures)) +
+  geom_bar(position = "fill") +
+  labs(x = "Seurat Clusters", y = "Proportion", fill = "Donor ID") +
+  scale_fill_manual(values = palDonorId) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+    axis.title.x = element_blank())
+
+plot4.tmp <- ggplot(metadata.tmp, aes(x = seurat_clusters, fill = seuratClustersAllCellsDS)) +
+  geom_bar(position = "fill") +
+  labs(x = "Seurat Clusters", y = "Proportion", fill = "Original Clusters") +
+  # scale_fill_manual(values = palCellType) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+    axis.title.x = element_blank())
+
+plot5.tmp <- ggplot(metadata.tmp, aes(x = seurat_clusters, fill = cellTypistCalling)) +
+  geom_bar(position = "fill") +
+  labs(x = "Seurat Clusters", y = "Proportion", fill = "CellTypist calling") +
+  scale_fill_manual(values = palCellTypist) +
+  theme_minimal()
+
+# Combine the plots vertically
+combined_plot <- plot_grid(plot1.tmp, plot2.tmp, plot3.tmp, plot4.tmp, plot5.tmp, ncol = 1, align = "v")
+
+# Save the combined plot to a PDF
+pdf(file.path(plotDir, paste0(filenameSuffix, nClustString, "_Combined_Proportions_in_seurat_clusters_TconvOnly.pdf")), height = 9, width = 8)
+print(combined_plot)
+dev.off()
+```
+
+```{r getTop10ClusterDefiningGenesDownsampled}
+DefaultAssay(seuratTconv) <- "RNA"
+Idents(seuratTconv) <- "seurat_clusters"
+# Join the data layers
+seuratTconv <- JoinLayers(seuratTconv)
+
+clusterMarkers <- FindAllMarkers(seuratTconv)
+
+# implement a filter so that we only consider genes expressed in a certain percentage of cells
+# Calculate the percentage of cells with non-zero expression for each gene in each cluster
+expressionData <- FetchData(seuratTconv, vars = unique(clusterMarkers$gene))
+metadata <- seuratTconv@meta.data %>%
+  dplyr::select(seurat_clusters) %>%
+  rownames_to_column("cell")
+
+expressionData <- expressionData %>%
+  rownames_to_column("cell") %>%
+  left_join(metadata, by = "cell")
+
+expressionDataLong <- expressionData %>%
+  pivot_longer(cols = -c(cell, seurat_clusters), names_to = "gene", values_to = "expression")
+
+expressionDataSummary <- expressionDataLong %>%
+  group_by(seurat_clusters, gene) %>%
+  summarise(percent_expressed = mean(expression > 0) * 100)
+
+min_percent_expressed <- 30
+clusterMarkers <- clusterMarkers %>%
+  left_join(expressionDataSummary, by = c("cluster" = "seurat_clusters", "gene" = "gene")) %>%
+  filter(percent_expressed >= min_percent_expressed)
+# end of expressed in x% of cells filtering
+
+
+topMarkersLong <- clusterMarkers %>%
+  dplyr::group_by(cluster) %>%
+  dplyr::filter(avg_log2FC > 0) %>%
+  dplyr::slice_max(avg_log2FC, n = 10) %>%
+  dplyr::slice_min(p_val_adj, n = 10) %>%
+  dplyr::mutate(fc_order = order(avg_log2FC))
+
+topMarkers <- topMarkersLong %>%
+  pivot_wider(id_cols = "fc_order",
+    names_from = "cluster",
+    values_from = "gene")
+
+topMarkersWide <- clusterMarkers %>%
+  # dplyr::filter(!str_detect(gene, "Trav|Trbv")) %>%
+  dplyr::mutate(cluster_id = paste0("Cluster ", cluster),
+    cluster_id = factor(cluster_id, levels = mixedsort(unique(cluster_id)))) %>%
+  dplyr::group_by(cluster_id) %>%
+  dplyr::mutate(row_order = order(p_val_adj)) %>%
+  pivot_wider(id_cols = row_order,
+    names_from = "cluster_id",
+    names_glue = "{cluster_id}_{.value}",
+    values_from = c("cluster_id",
+      "gene",
+      "avg_log2FC",
+      "p_val_adj"))
+
+clusters <- unique(clusterMarkers$cluster) %>% mixedsort()
+clusterLabs <- paste0("Cluster ", rep(clusters)) # , each = 4
+
+columnLabs <- c("cluster_id",
+  "gene",
+  "avg_log2FC",
+  "p_val_adj")
+
+nClust <- length(unique(seuratQCMergedCleanedDS$seurat_clusters))
+columnLabs <- rep(columnLabs, nClust)
+
+columnLabs <- paste0(clusterLabs, "_", columnLabs)
+
+topMarkersWide <- topMarkersWide %>%
+  dplyr::select(columnLabs)
+#```
+
+### Top-cluster defining genes
+
+# The top 10 cluster defining genes are shown in the table below. These genes are selected by ranking by p-value among genes that are up in a given cluster relative to all others. 
+
+# ```{r clust_table, results = 'asis'}
+topMarkers <- topMarkers %>%
+  dplyr::select(-one_of("fc_order"))
+
+topMarkers %>%
+  kable(row.names = F) %>%
+  kable_styling("striped",
+    full_width = F,
+    position = "left") %>%
+  scroll_box(height = "900px")
+
+# write.csv(topMarkers, file.path(dataOutputDir, "top10_genes_per_cluster_downsampled_Treg.csv"), quote = FALSE, row.names = TRUE)
+```
+
+```{r clusterDefiningGenesDotPlot}
+nClust <- length(table(seuratTconv@meta.data$seurat_clusters))
+nClustString <- paste0("_", as.character(nClust), "Clusters")
+
+fontSize <- 12
+
+# Extract the gene names from the topMarkers tibble
+genes.tmp <- unique(unlist(topMarkers))
+
+# Create a DotPlot of the expression of these genes in seuratQCMergedCleanedDS
+dot_plot <- DotPlot(seuratTconv, features = genes.tmp) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1, size = 8),
+    text = element_text(size = fontSize),
+    axis.text.y = element_text(size = fontSize),
+    axis.title.y = element_text(size = fontSize),
+    legend.text = element_text(size = fontSize),
+    legend.title = element_text(size = fontSize),
+    strip.text = element_text(size = fontSize),
+    plot.title = element_text(size = fontSize))
+
+# Print the DotPlot
+pdf(file.path(plotDir, paste0(filenameSuffix, nClustString, "_clusterDefiningGenesDotPlotTconvs.pdf")), height = 5, width = 12)
+print(dot_plot)
+dev.off()
+
+rm_tmp(ask = FALSE)
+```
+
+```{r showstemnessScoreOnUMAPTconvOnly}
+pdf(file.path(plotDir,
+  paste0(filenameSuffix, "_UMAP_RNA_stemnessScore_TconvOnly.pdf")),
+height = 6,
+width = 12)
+
+FeaturePlot(object = seuratTconv,
+  features = "stemnessScore",
+  reduction = "umap",
+  pt.size = 1) +
+  scale_color_viridis_c() +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "stemnessScore", title = "") +
+  theme(aspect.ratio = 1)
+#   facet_wrap(~seurat_clusters)
+
+dev.off()
+
+# Ensure 'seurat_clusters' exists, then proceed with plotting
+pdf(file.path(plotDir, paste0(filenameSuffix, "_UMAP_RNA_stimulationFacetTconvOnly.pdf")), height = 5.5, width = 10)
+
+# Extract UMAP data
+umap_data <- Embeddings(seuratTconv, "umap")
+
+# Name the columns of umap_data explicitly to match expected names in ggplot
+colnames(umap_data) <- c("UMAP_1", "UMAP_2")
+
+# Convert umap_data to a data frame
+umap_data_df <- as.data.frame(umap_data)
+
+# Add row names as a new column for merging
+umap_data_df$cells <- rownames(umap_data_df)
+
+# Ensure metadata has a column to merge on, typically cell names
+metadata <- seuratTconv@meta.data
+metadata$cells <- rownames(metadata)
+
+# Combine UMAP data with metadata for plotting
+plot_data <- merge(umap_data_df, metadata, by = "cells")
+
+# Use ggplot for plotting to manually handle facets and colors
+p <- ggplot(plot_data, aes(x = UMAP_1, y = UMAP_2, color = stemnessScore)) +
+  geom_point(size = 1) +
+  scale_color_viridis_c() +
+  labs(x = "UMAP 1", y = "UMAP 2", color = "stemnessScore", title = "") +
+  theme(aspect.ratio = 1) +
+  facet_wrap(~stimulationFigures) # Now using the combined data
+
+print(p)
+dev.off()
+```
+
+```{r makeAirlinePlotTconvOnly}
+# -------------------all three stimulations---------------------------------
+# Extract the cdr3CloneID column from the metadata
+cdr3CloneIDs <- seuratTconv@meta.data$cdr3CloneID
+
+# Count the occurrences of each cdr3CloneID
+cdr3CloneID_counts <- table(cdr3CloneIDs)
+
+# Filter the IDs that have 3 or more occurrences
+cdr3CloneID_filtered <- names(cdr3CloneID_counts[cdr3CloneID_counts >= 2])
+
+# Print the filtered cdr3CloneID names
+# print(cdr3CloneID_filtered)
+airlinePlot(seuratTconv,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences",
+  plotName = "AirlinePlotAllStimTconvOnly5Clust")
+
+airlinePlotDonorId(seuratTconv,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences",
+  plotName = "AirlinePlotAllStimTconvOnly5ClustDonorId")
+
+# --------------------------------------------------------------------------
+
+# -----------------------------------IAR------------------------------------
+# make subset Seurat object
+seurat_subset.tmp <- subset(seuratTconv, subset = stimulationFigures == "IAR")
+
+# Extract the cdr3CloneID column from the metadata
+cdr3CloneIDs <- seurat_subset.tmp@meta.data$cdr3CloneID
+
+# Count the occurrences of each cdr3CloneID
+cdr3CloneID_counts <- table(cdr3CloneIDs)
+
+# Filter the IDs that have 3 or more occurrences
+cdr3CloneID_filtered <- names(cdr3CloneID_counts[cdr3CloneID_counts >= 2])
+
+# Print the filtered cdr3CloneID names
+print(cdr3CloneID_filtered)
+
+airlinePlot(seurat_subset.tmp,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences\nIAR",
+  plotName = "AirlinePlotIARTconvOnly5ClustIAR")
+
+airlinePlotDonorId(seurat_subset.tmp,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences\nIAR",
+  plotName = "AirlinePlotIARTconvOnly5ClustIARDonorId")
+
+rm_tmp(ask = FALSE)
+# --------------------------------------------------------------------------
+
+# -----------------------------------Microbial------------------------------------
+# make subset Seurat object
+seurat_subset.tmp <- subset(seuratTconv, subset = stimulationFigures == "Microbial")
+
+# Extract the cdr3CloneID column from the metadata
+cdr3CloneIDs <- seurat_subset.tmp@meta.data$cdr3CloneID
+
+# Count the occurrences of each cdr3CloneID
+cdr3CloneID_counts <- table(cdr3CloneIDs)
+
+# Filter the IDs that have 3 or more occurrences
+cdr3CloneID_filtered <- names(cdr3CloneID_counts[cdr3CloneID_counts >= 2])
+
+# Print the filtered cdr3CloneID names
+print(cdr3CloneID_filtered)
+
+airlinePlot(seurat_subset.tmp,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences\nMicrobial/CEFX",
+  plotName = "AirlinePlotIARTconvOnly5ClustMicrobial")
+
+airlinePlotDonorId(seurat_subset.tmp,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences\nMicrobial/CEFX",
+  plotName = "AirlinePlotIARTconvOnly5ClustMicrobialDonorId")
+
+rm_tmp(ask = FALSE)
+# --------------------------------------------------------------------------
+
+# -----------------------------------Polyclonal------------------------------------
+# make subset Seurat object
+seurat_subset.tmp <- subset(seuratTconv, subset = stimulationFigures == "Polyclonal")
+
+# Extract the cdr3CloneID column from the metadata
+cdr3CloneIDs <- seurat_subset.tmp@meta.data$cdr3CloneID
+
+# Count the occurrences of each cdr3CloneID
+cdr3CloneID_counts <- table(cdr3CloneIDs)
+
+# Filter the IDs that have 3 or more occurrences
+cdr3CloneID_filtered <- names(cdr3CloneID_counts[cdr3CloneID_counts >= 2])
+
+# Print the filtered cdr3CloneID names
+print(cdr3CloneID_filtered)
+
+airlinePlot(seurat_subset.tmp,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences\nPolyclonal",
+  plotName = "AirlinePlotIARTconvOnly5ClustPolyclonal")
+
+airlinePlotDonorId(seurat_subset.tmp,
+  cloneIDColumn = "cdr3CloneID",
+  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
+  savePlot = TRUE,
+  plotTitle = "Clone IDs with 2+ occurrences\nPolyclonal",
+  plotName = "AirlinePlotIARTconvOnly5ClustPolyclonalDonorId")
+
+rm_tmp(ask = FALSE)
+# --------------------------------------------------------------------------
+```
+
+### End of Tconv-only analysis
 
 ```{r plotTconvsTregsOnUMAP}
 # Print unique values of stimulationFigures to verify
@@ -9523,7 +10220,7 @@ topMarkers %>%
     position = "left") %>%
   scroll_box(height = "900px")
 
-write.csv(topMarkers, file.path(dataDir, "top10_genes_per_cluster_default.csv"), quote = FALSE, row.names = TRUE)
+write.csv(topMarkers, file.path(dataInputDir, "top10_genes_per_cluster_default.csv"), quote = FALSE, row.names = TRUE)
 ```
 
 ```{r P390GenesHeatmap}
@@ -10051,6 +10748,100 @@ airlinePlotCT <- function(seuratObj,
 
   return(gPlot)
 }
+
+# this version colors points by DonorId
+airlinePlotDonorId <- function(seuratObj,
+                               cloneIDColumn,
+                               cloneIDs,
+                               arcLinewidth = 0.2,
+                               arcAlpha = 0.5,
+                               savePlot = FALSE,
+                               plotTitle,
+                               plotName = "AirlinePlot") {
+
+  DefaultAssay(seuratObj) <- "RNA"
+
+  # Make sure a umap project exits
+
+  if (is.null(seuratObj@reductions$umap)) {
+    stop("UMAP must first be run on the Seurat object")
+  }
+
+  # Make sure the clone ID column exists
+  if (!(cloneIDColumn %in% colnames(seuratObj@meta.data))) {
+    stop("Check that the clone ID column exists in the metadata")
+  }
+
+
+
+  # Link umap coordinates to cloneIDs
+  umapDF <- data.frame(cloneID = seuratObj@meta.data[, cloneIDColumn],
+    umap1 = seuratObj@reductions$umap@cell.embeddings[, 1],
+    umap2 = seuratObj@reductions$umap@cell.embeddings[, 2])
+
+  # Filter the umapDF to only include the cloneIDs of interest
+  umapDF <- umapDF %>%
+    dplyr::filter(cloneID %in% cloneIDs)
+
+  # create data frame to store links
+  curves.tmp <-
+    data.frame(
+      cloneID = character(),
+      x = numeric(),
+      y = numeric(),
+      xend = numeric(),
+      yend = numeric())
+
+  # loop over each clone, and extract coordinates for cells from the same clone
+  for (clone_id.tmp in na.omit(unique(umapDF$cloneID))) {
+    clone_id_curves.tmp <- curves.tmp[0, ]
+    data_for_curves.tmp <-
+      umapDF %>%
+      dplyr::filter(cloneID %in% clone_id.tmp)
+    for (i in 1:(nrow(data_for_curves.tmp) - 1)) {
+      for (j in (i + 1):nrow(data_for_curves.tmp)) {
+        clone_id_curves.tmp <-
+          rbind(
+            clone_id_curves.tmp,
+            list(
+              cloneID =
+                data_for_curves.tmp$cloneID[i],
+              x = data_for_curves.tmp$umap1[i],
+              y = data_for_curves.tmp$umap2[i],
+              xend = data_for_curves.tmp$umap1[j],
+              yend = data_for_curves.tmp$umap2[j]))
+      }
+    }
+    curves.tmp <-
+      rbind(curves.tmp, clone_id_curves.tmp)
+  }
+
+  gPlot <- DimPlot(object = seuratObj, reduction = "umap", group.by = "donorIdFigures") +
+    # labs(title = "") +
+    labs(title = plotTitle, x = "UMAP 1", y = "UMAP 2", color = "Donor ID") +
+    geom_curve(
+      data = curves.tmp,
+      mapping = aes(x = x, y = y, xend = xend, yend = yend),
+      linewidth = arcLinewidth,
+      alpha = arcAlpha)  +
+    scale_color_manual(values = palDonorId) +
+    theme(aspect.ratio = 1)
+
+  if (savePlot == TRUE) {
+
+    png(file = file.path(plotDir, paste0(plotName, ".png")),
+      width = 7,
+      height = 5.5,
+      units = "in",
+      res = 600)
+
+    print(gPlot)
+
+    invisible(dev.off())
+  }
+
+  return(gPlot)
+}
 ```
 
 ```{r makeAirlinePlot}
@@ -10261,55 +11052,6 @@ airlinePlotCT(seurat_subset.tmp,
   savePlot = TRUE,
   plotTitle = "Clone IDs with 2+ occurrences\nPolyclonal",
   plotName = "AirlinePlotPolyclonalCT")
-
-rm_tmp(ask = FALSE)
-# --------------------------------------------------------------------------
-```
-
-```{r makeAirlinePlotTregOnly}
-# -------------------all three stimulations---------------------------------
-# Extract the cdr3CloneID column from the metadata
-cdr3CloneIDs <- seuratTreg@meta.data$cdr3CloneID
-
-# Count the occurrences of each cdr3CloneID
-cdr3CloneID_counts <- table(cdr3CloneIDs)
-
-# Filter the IDs that have 3 or more occurrences
-cdr3CloneID_filtered <- names(cdr3CloneID_counts[cdr3CloneID_counts >= 2])
-
-# Print the filtered cdr3CloneID names
-# print(cdr3CloneID_filtered)
-airlinePlot(seuratTreg,
-  cloneIDColumn = "cdr3CloneID",
-  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
-  savePlot = TRUE,
-  plotTitle = "Clone IDs with 2+ occurrences",
-  plotName = "AirlinePlotAllStimTregOnly2Clust")
-
-# --------------------------------------------------------------------------
-
-# -----------------------------------IAR------------------------------------
-# make subset Seurat object
-seurat_subset.tmp <- subset(seuratTreg, subset = stimulationFigures == "IAR")
-
-# Extract the cdr3CloneID column from the metadata
-cdr3CloneIDs <- seurat_subset.tmp@meta.data$cdr3CloneID
-
-# Count the occurrences of each cdr3CloneID
-cdr3CloneID_counts <- table(cdr3CloneIDs)
-
-# Filter the IDs that have 3 or more occurrences
-cdr3CloneID_filtered <- names(cdr3CloneID_counts[cdr3CloneID_counts >= 2])
-
-# Print the filtered cdr3CloneID names
-print(cdr3CloneID_filtered)
-
-airlinePlot(seurat_subset.tmp,
-  cloneIDColumn = "cdr3CloneID",
-  cloneIDs = cdr3CloneID_filtered, # c("Clone_378"),
-  savePlot = TRUE,
-  plotTitle = "Clone IDs with 2+ occurrences\nIAR",
-  plotName = "AirlinePlotIARTregOnly2Clust")
 
 rm_tmp(ask = FALSE)
 # --------------------------------------------------------------------------

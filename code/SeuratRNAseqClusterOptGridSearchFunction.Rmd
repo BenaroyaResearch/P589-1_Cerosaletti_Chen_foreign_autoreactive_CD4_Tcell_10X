@@ -1,0 +1,176 @@
+```{r defineRNAseqClusterOptimizationFunction}
+optimizeRNAseqClustering <- function(seuratObject,
+                                     hyperParamGridPCA.df,
+                                     min.dist.vector,
+                                     n_neighbors.vector,
+                                     maxNClusters = 10,
+                                     minNClusters = 2) {
+  # ------------------------------------------------INPUTS------------------------------------------------
+  # seuratObject is... a seurat object
+  # hyperParamGridPCA.df is an expanded grid for a full grid search for PCA clustering. type: dataframe
+  # hyperParamGridUMAP.list is a list (of lists) of UMAP hyperparameters. type: list
+  # min.dist.vector is a vector of min.dist values to pass to UMAP (via scDEED())
+  # n_neighbors.vector is a vector of n_neighbors values to pass to UMAP (via scDEED())
+  # maxNClusters is the maximum number of clusters to be considered (will evaluate 2 through maxNClusters)
+  #-------------------------------------------------------------------------------------------------------
+
+  #----------------------------------------------OUTPUTS--------------------------------------------------
+  # result contains $hyperParamGridOptClusterAndUMAP.df and $hyperParamGridClusterOnly.df
+  #   Extract like:
+  #     hyperParamGridOptClusterAndUMAP.df <- result$hyperParamGridOptClusterAndUMAP.df (smaller output with opt PCA clustering and UMAP embedding params)
+  #     hyperParamGridClusterOnly.df <- result$hyperParamGridClusterOnly.df (larger output with full PCA clustering gridsearch and results)
+  #--------------------------------------------------------------------------------------------------------
+
+  #-----------------------------------------REQUIRED PACKAGES----------------------------------------------
+  # Seurat, parallel, doParallel, foreach, clusterSim, cluster, dplyr, scDEED, stringr
+  #--------------------------------------------------------------------------------------------------------
+
+  # STEP 1: grid search over FindNeighbors() and FindClusters() hyperparameters to find
+  # the best combinations for each nClusters obtained
+
+  # detect nuymber of cores, leave one available for the machine to do other things
+  nCores <- parallel::detectCores() - 1
+
+  # create the cluster for parallel computation
+  myCluster <- parallel::makeCluster(
+    nCores,
+    type = "FORK"
+  )
+
+  # register it to be used by %dopar%
+  doParallel::registerDoParallel(cl = myCluster)
+
+  # Hyperparameter grid search
+  clusteringMetrics <- foreach(
+    findNeighborsDim = hyperParamGridPCA.df$findNeighborsDim,
+    findClustersRes = hyperParamGridPCA.df$findClustersRes,
+    .combine = "cbind"
+  ) %dopar% {
+    # do the UMAP clustering on the Seurat object
+    set.seed(6022)
+    seuratObject <- FindNeighbors(seuratObject, dims = 1:findNeighborsDim, verbose = FALSE)
+    seuratObject <- FindClusters(seuratObject, resolution = findClustersRes, verbose = FALSE)
+
+    # extract the cluster information
+    metaData.df <- seuratObject@meta.data
+
+    # Extract PCA embeddings
+    pcaEmbeddings <- seuratObject@reductions$pca@cell.embeddings
+
+    clusterMat <- pcaEmbeddings
+    clusterVect <- as.numeric(metaData.df$seurat_clusters)
+    nClusters <- dim(table(metaData.df$seurat_clusters))
+
+    # calculate clustering metrics
+    daviesBouldinIdx <- index.DB(clusterMat, clusterVect)
+    calinskiHarabasz <- index.G1(clusterMat, clusterVect)
+    silScore <- silhouette(clusterVect, dist(clusterMat))
+    if (anyNA(silScore)) { # this is gross and clumsy, but hey, we'll fix it later
+      medianSilScore <- NaN
+    } else {
+      silScoreSummary <- summary(silScore)
+      medianSilScore <- silScoreSummary$si.summary["Median"]
+    }
+
+    clusteringMetrics <- c("nClusters" = nClusters,
+      "DBIndex" = daviesBouldinIdx$DB,
+      "CHMetric" = calinskiHarabasz,
+      "medianSilScore" = medianSilScore)
+    return(clusteringMetrics)
+  }
+
+  # transpose the result
+  clusteringMetrics <- t(clusteringMetrics)
+
+  # adding the prediction error column
+  hyperParamGridPCA.df$DBIndex <- clusteringMetrics[, "DBIndex"]
+  hyperParamGridPCA.df$CHMetric <- clusteringMetrics[, "CHMetric"]
+  hyperParamGridPCA.df$medianSilScore <- clusteringMetrics[, "medianSilScore"]
+  hyperParamGridPCA.df$nClusters <- clusteringMetrics[, "nClusters"]
+
+  # stop cluster after we're done
+  parallel::stopCluster(cl = myCluster)
+
+  # scale the clustering metrics to fall between 0 and 1
+  hyperParamGridPCA.df$DBIndex <- (hyperParamGridPCA.df$DBIndex - min(hyperParamGridPCA.df$DBIndex, na.rm = TRUE)) /
+    (max(hyperParamGridPCA.df$DBIndex, na.rm = TRUE) - min(hyperParamGridPCA.df$DBIndex, na.rm = TRUE))
+
+  hyperParamGridPCA.df$CHMetric <- (hyperParamGridPCA.df$CHMetric - min(hyperParamGridPCA.df$CHMetric, na.rm = TRUE)) /
+    (max(hyperParamGridPCA.df$CHMetric, na.rm = TRUE) - min(hyperParamGridPCA.df$CHMetric, na.rm = TRUE))
+
+  hyperParamGridPCA.df$medianSilScore <- (hyperParamGridPCA.df$medianSilScore - min(hyperParamGridPCA.df$medianSilScore, na.rm = TRUE)) /
+    (max(hyperParamGridPCA.df$medianSilScore, na.rm = TRUE) - min(hyperParamGridPCA.df$medianSilScore, na.rm = TRUE))
+
+  # make an inverse DB score so that it is more easily compared to the other two metrics
+  # (small DB is best, but large CH and silscore are best)
+  hyperParamGridPCA.df$DBIndexInverse <- 1 - hyperParamGridPCA.df$DBIndex
+
+  # create hyperParamGridPCA.df$meanEvalMetric, as the mean of $DBIndex, $CHMetric, $medianSilScore
+  hyperParamGridPCA.df$meanEvalMetric <- rowMeans(hyperParamGridPCA.df[, c("DBIndexInverse", "CHMetric", "medianSilScore")], na.rm = TRUE)
+
+  # sort and export (optional) the hyperparamgrid
+  hyperParamGridPCA.df <- hyperParamGridPCA.df %>%
+    arrange(nClusters, desc(meanEvalMetric))
+
+  # TODO: wrap this in an if statement to print out a file if the user requests it with a true/false function parameter
+  # write.xlsx(hyperParamGridPCA.df, file = file.path(dataOutputDir, "20242017_RNA_clustering_hyperParamGrid.xlsx"))
+
+  # create a subset of hyperParamGridPCA.df with the best option for each nClusters
+  hyperParamGridOptSubset.df <- hyperParamGridPCA.df %>%
+    group_by(nClusters) %>%
+    filter(meanEvalMetric == max(meanEvalMetric)) %>%
+    ungroup()
+
+  # Pre-allocate min.dist and n_neighbors columns with NA values
+  hyperParamGridOptSubset.df$min.dist <- NA
+  hyperParamGridOptSubset.df$n_neighbors <- NA
+
+  # STEP 2: use scDEED to optimize the UMAP hyperparameters
+  # ---------------------------start of scDEED UMAP opt---------------------------------------
+  # if nrow(hyperParamGridOptSubset.df) is smaller than maxNClusters, then set maxNClusters to nrow(hyperParamGridOptSubset.df)
+  if (nrow(hyperParamGridOptSubset.df) < maxNClusters) {
+    maxNClusters <- nrow(hyperParamGridOptSubset.df)
+  }
+
+  # Loop over the rows of hyperParamGridOptSubset.df, finding the best UMAP embedding for each nClusters
+  for (i in minNClusters:maxNClusters) {
+    # Extract necessary values from hyperParamGridOptSubset.df
+    nClusters <- hyperParamGridOptSubset.df$nClusters[i]
+    numPCs <- hyperParamGridOptSubset.df$findNeighborsDim[i]
+    findClustersRes <- hyperParamGridOptSubset.df$findClustersRes[i]
+
+    set.seed(6022)
+    seuratObject <- FindNeighbors(seuratObject, dims = 1:numPCs)
+    seuratObject <- FindClusters(seuratObject, resolution = findClustersRes)
+
+    scDEEDResult <- scDEED(seuratObject, # input Seurat object (must have UMAP or t-SNE already run)
+      K = numPCs, # number of PCs
+      reduction.method = "umap", # 'umap' or 'tsne'
+      min.dist =  min.dist.vector, # scDEED default is 0.1 & 0.4; Seurat default is 0.3
+      n_neighbors = n_neighbors.vector, # scDEED defaults are c(5, 20, 30, 40, 50). Seurat default is 30.
+      similarity_percent = 0.5, # scDEECD default
+      dubious_cutoff = 0.05, # scDEED default
+      trustworthy_cutoff = 0.95) # scDEED default
+
+    # add $number_trustworthy_cells and $number_intermediate_cells to scDEEDResult
+    scDEEDResult$full_results$number_trustworthy_cells <- str_count(scDEEDResult$full_results$trustworthy_cells, ",") + 1
+    scDEEDResult$full_results$number_intermediate_cells <- str_count(scDEEDResult$full_results$intermediate_cells, ",") + 1
+
+    # utile scDEED output
+    optIdx <- which(scDEEDResult$num_dubious$number_dubious_cells == min(scDEEDResult$num_dubious$number_dubious_cells)) # find the result with the fewest 'dubiously' embedded cells
+    # min.distOpt <- scDEEDResult$num_dubious$min.dist[optIdx]
+    # n_neighborsOpt <- scDEEDResult$num_dubious$n_neighbors[optIdx]
+
+    # just output the optimal hyperparams into hyperParamGridOptSubset.df
+    hyperParamGridOptSubset.df$min.dist[i] <- scDEEDResult$num_dubious$min.dist[optIdx]
+    hyperParamGridOptSubset.df$n_neighbors[i] <- scDEEDResult$num_dubious$n_neighbors[optIdx]
+  }
+
+  # Reorder columns to place min.dist and n_neighbors after findClustersRes
+  hyperParamGridOptSubset.df <- hyperParamGridOptSubset.df %>%
+    dplyr::select(findNeighborsDim, findClustersRes, min.dist, n_neighbors, everything())
+
+  # Return the hyperparam dataframes
+  return(list(hyperParamGridOptClusterAndUMAP.df = hyperParamGridOptSubset.df, hyperParamGridClusterOnly.df = hyperParamGridPCA.df))
+}
+```

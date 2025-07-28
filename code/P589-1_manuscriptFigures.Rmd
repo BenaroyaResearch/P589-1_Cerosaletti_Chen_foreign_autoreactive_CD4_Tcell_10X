@@ -93,7 +93,7 @@ baseDir <- "/Users/tedwards/Documents/projects/P589-1_Cerosaletti_Chen_foreign_a
 dataInputDir <- file.path(baseDir, "data/input")
 plotDir <- file.path(baseDir, "figures")
 dataOutputDir <- file.path(baseDir, "data/output")
-dataDate <- "2025-06-16"
+dataDate <- "2025-07-16"
 filenameSuffix <- paste0("P589-1_autoreactive_CD4_Tcell_10X.", dataDate, "_")
 
 P589_1Samples <- c("pool589-1_1",
@@ -116,7 +116,8 @@ poolOrder <- c("1", "2")
 ```{r loadPreprocessedData, cache = TRUE}
 # Load the preprocessed data
 # load(file.path(dataOutputDir, "20250402_processedData.RData"))
-load(file.path(dataOutputDir, "20250610_preprocData_TregTconvClusteringTroubleShooting.RData"))
+# load(file.path(dataOutputDir, "20250626_preprocData.RData"))
+load(file.path(dataOutputDir, "20250715_preprocData.RData"))
 ```
 
 ```{r setupConstants, cache = TRUE}
@@ -126,7 +127,7 @@ fontSize <- 8
 
 ```{r CITEseqMarkerScatterPlotsStimulationSplit_forGating_logNorm_noDownsample_densityPlot}
 # Manuscript Figure SF1
-# Fig S1A
+# Figure S1B
 # Set plot sizes
 plotHeight <- 7
 plotWidth <- 7
@@ -753,6 +754,13 @@ seuratTreg <- JoinLayers(seuratTreg)
 
 clusterMarkers <- FindAllMarkers(seuratTreg)
 
+# create clusterMarkersFiltered with p_val_adj < 0.05
+clusterMarkersFiltered.tmp <- clusterMarkers %>%
+  dplyr::filter(p_val_adj < 0.05)
+
+# save clusterMarkersFiltered as .xlsx to dataOutputDir
+write.xlsx(clusterMarkersFiltered.tmp, file.path(dataOutputDir, paste0("TregClusterMarkersFiltered.xlsx")), rowNames = TRUE)
+
 # implement a filter so that we only consider genes expressed in a certain percentage of cells
 # Calculate the percentage of cells with non-zero expression for each gene in each cluster
 expressionData <- FetchData(seuratTreg, vars = unique(clusterMarkers$gene))
@@ -836,7 +844,7 @@ topMarkers <- topMarkers %>%
 #     position = "left") %>%
 #   scroll_box(height = "900px")
 
-# write.csv(topMarkers, file.path(dataOutputDir, paste0("top", as.character(nGenes), "_genes_per_cluster_Treg.csv")), quote = FALSE, row.names = TRUE)
+write.csv(topMarkers, file.path(dataOutputDir, paste0("top", as.character(nGenes), "_genes_per_cluster_Treg.csv")), quote = FALSE, row.names = TRUE)
 
 # now for figure-making code:
 
@@ -883,7 +891,7 @@ rm_tmp(ask = FALSE)
 
 ```{r FigureS2C}
 # cluster-defining genes, Tconvs
-nGenes <- 10
+nGenes <- 30
 nGenesString <- as.character(nGenes)
 DefaultAssay(seuratTconv) <- "RNA"
 Idents(seuratTconv) <- "seurat_clusters"
@@ -891,6 +899,13 @@ Idents(seuratTconv) <- "seurat_clusters"
 seuratTconv <- JoinLayers(seuratTconv)
 
 clusterMarkers <- FindAllMarkers(seuratTconv)
+
+# create clusterMarkersFiltered with p_val_adj < 0.05
+clusterMarkersFiltered.tmp <- clusterMarkers %>%
+  dplyr::filter(p_val_adj < 0.05)
+
+# save clusterMarkersFiltered as .xlsx to dataOutputDir
+write.xlsx(clusterMarkersFiltered.tmp, file.path(dataOutputDir, paste0("TconvClusterMarkersFiltered.xlsx")), rowNames = TRUE)
 
 # implement a filter so that we only consider genes expressed in a certain percentage of cells
 # Calculate the percentage of cells with non-zero expression for each gene in each cluster
@@ -975,7 +990,7 @@ topMarkers <- topMarkers %>%
 #     position = "left") %>%
 #   scroll_box(height = "900px")
 
-# write.csv(topMarkers, file.path(dataOutputDir, paste0("top", as.character(nGenes), "_genes_per_cluster_Tconv.csv")), quote = FALSE, row.names = TRUE)
+write.csv(topMarkers, file.path(dataOutputDir, paste0("top", as.character(nGenes), "_genes_per_cluster_Tconv.csv")), quote = FALSE, row.names = TRUE)
 
 # now for figure-making code:
 
@@ -1468,14 +1483,14 @@ colors <- c(
   scales::alpha("red", 0.5), scales::alpha("red", 0.5)
 )
 makeClusterExpansionUpsetPlots(seuratObject = seurat.tmp,
-  pairs = cleanTCRpairs.df,
+  pairs = cleanTCRAgSpecificpairs.df,
   clusterColumn = "seurat_clusters_DS",
   title = "TCR sharing in RNAseq clusters\nMicrobial",
   colors = colors,
   filename = "microbial_TCR_Pair_Sharing_UpSet_Plot")
 
 makeClusterExpansionUpsetPlots(seuratObject = seurat.tmp,
-  pairs = cleanTCRpairs.df,
+  pairs = cleanTCRAgSpecificpairs.df,
   clusterColumn = "seurat_clusters_DS",
   title = "TCR sharing in RNAseq clusters\nMicrobial",
   colors = colors,
@@ -1490,14 +1505,14 @@ colors <- c(
   scales::alpha("red", 0.5)
 )
 makeClusterExpansionUpsetPlots(seuratObject = seurat.tmp,
-  pairs = cleanTCRpairs.df,
+  pairs = cleanTCRAgSpecificpairs.df,
   clusterColumn = "seurat_clusters_DS",
   title = "TCR sharing in RNAseq clusters\nPolyclonal",
   colors = colors,
   filename = "polyclonal_TCR_Pair_Sharing_UpSet_Plot")
 
 makeClusterExpansionUpsetPlots(seuratObject = seurat.tmp,
-  pairs = cleanTCRpairs.df,
+  pairs = cleanTCRAgSpecificpairs.df,
   clusterColumn = "seurat_clusters_DS",
   title = "TCR sharing in RNAseq clusters\nPolyclonal",
   colors = colors,
@@ -1512,19 +1527,42 @@ colors <- c(
   scales::alpha("red", 0.5)
 )
 makeClusterExpansionUpsetPlots(seuratObject = seurat.tmp,
-  pairs = cleanTCRpairs.df,
+  pairs = cleanTCRAgSpecificpairs.df,
   clusterColumn = "seurat_clusters_DS",
   title = "TCR sharing in RNAseq clusters\nIAR",
   colors = colors,
   filename = "IAR_TCR_Pair_Sharing_UpSet_Plot")
 
 makeClusterExpansionUpsetPlots(seuratObject = seurat.tmp,
-  pairs = cleanTCRpairs.df,
+  pairs = cleanTCRAgSpecificpairs.df,
   clusterColumn = "seurat_clusters_DS",
   title = "TCR sharing in RNAseq clusters\nIAR",
   colors = colors,
   displayCounts = FALSE,
   filename = "IAR_TCR_Pair_Sharing_UpSet_Plot_noCounts")
+
+# inter-stimulation version
+seurat.tmp <- subset(seuratQCMergedCleaned, cellType %in% c("Treg", "Tconv"))
+
+colors <- c(
+  scales::alpha("red", 0.5), scales::alpha("red", 0.5), scales::alpha("red", 0.5),
+  scales::alpha("blue", 0.5), scales::alpha("blue", 0.5),
+  scales::alpha("red", 0.5), scales::alpha("red", 0.5)
+)
+makeClusterExpansionUpsetPlots(seuratObject = seurat.tmp,
+  pairs = cleanTCRAgSpecificInterStimPairs.df,
+  clusterColumn = "seurat_clusters_DS",
+  title = "TCR sharing in RNAseq clusters\nbetween stimulations",
+  colors = colors,
+  filename = "InterStimulation_TCR_Pair_Sharing_UpSet_Plot")
+
+makeClusterExpansionUpsetPlots(seuratObject = seurat.tmp,
+  pairs = cleanTCRAgSpecificInterStimPairs.df,
+  clusterColumn = "seurat_clusters_DS",
+  title = "TCR sharing in RNAseq clusters\nbetween stimulations",
+  colors = colors,
+  displayCounts = FALSE,
+  filename = "InterStimulation_TCR_Pair_Sharing_UpSet_Plot_noCounts")
 
 rm_tmp(ask = FALSE)
 ```
@@ -1669,7 +1707,7 @@ genesToHighlight <- c("DDX5", "DAD1", "DUSP23", "MRPL12", "RPL4", "RPL6", "STAT1
 
 nGenes <- 60
 
-results_IAR_vs_MicrobialTreg <- read.csv(paste0(dataOutputDir, "/DGE_Treg_IARVMicrobial.csv"))
+results_IAR_vs_MicrobialTreg <- read.csv(paste0(dataOutputDir, "/P589-1_autoreactive_CD4_Tcell_10X.2025-07-16_DGE_Treg_IARVMicrobial.csv"))
 top_genes <- results_IAR_vs_MicrobialTreg %>%
   dplyr::filter(adj.P.Val < 0.05) %>%
   dplyr::arrange(adj.P.Val) %>%
@@ -1786,7 +1824,7 @@ genesToHighlight <- c("CD63", "CD47", "PIM3", "EIF5B", "GUK1", "RSU1", "IRF1", "
 
 nGenes <- 60
 
-results_IAR_vs_MicrobialTconv <- read.csv(paste0(dataOutputDir, "/DGE_Tconv_IARVMicrobial.csv"))
+results_IAR_vs_MicrobialTconv <- read.csv(paste0(dataOutputDir, "/P589-1_autoreactive_CD4_Tcell_10X.2025-07-16_DGE_Tconv_IARVMicrobial.csv"))
 top_genes <- results_IAR_vs_MicrobialTconv %>%
   dplyr::filter(adj.P.Val < 0.05) %>%
   dplyr::arrange(adj.P.Val) %>%
@@ -2370,11 +2408,11 @@ rm_tmp(ask = FALSE)
 
 ```{r FigureS6C_expansionProportionPlotsTregsClusterFacetDonorCellsInStimDenom_noPolyclonal}
 # Create a clone ID in your TCR dataframe
-cleanTCRpairs.df <- cleanTCRpairs.df %>%
+cleanTCRAgSpecificpairs.df <- cleanTCRAgSpecificpairs.df %>%
   mutate(cloneID = paste(fullLengthNTa, fullLengthNTb, sep = "_"))
 
 # Count how many cells per cloneID
-clone_counts <- cleanTCRpairs.df %>%
+clone_counts <- cleanTCRAgSpecificpairs.df %>%
   group_by(cloneID) %>%
   summarise(n_cells = n(), .groups = "drop")
 
@@ -2384,7 +2422,7 @@ expanded_clones <- clone_counts %>%
   pull(cloneID)
 
 # Annotate each cell as expanded or not
-cleanTCRpairs.df <- cleanTCRpairs.df %>%
+cleanTCRAgSpecificpairs.df <- cleanTCRAgSpecificpairs.df %>%
   mutate(expanded = cloneID %in% expanded_clones)
 
 # Add expansion info to Seurat metadata
@@ -2394,7 +2432,7 @@ metadata_Treg <- seuratQCMergedCleaned@meta.data %>%
 
 # Merge with TCR info
 metadata_Treg <- metadata_Treg %>%
-  left_join(cleanTCRpairs.df %>% select(barcode, expanded), by = "barcode") %>%
+  left_join(cleanTCRAgSpecificpairs.df %>% select(barcode, expanded), by = "barcode") %>%
   mutate(expanded = ifelse(is.na(expanded), FALSE, expanded))
 
 # ---- NEW: Filter to only IAR and Microbial ----
@@ -2501,11 +2539,11 @@ savePlot(
 
 ```{r FigureS6D_expansionProportionPlotsTconvsClusterFacetDonorCellsInStimDenom_noPolyclonal}
 # Create a clone ID in your TCR dataframe
-cleanTCRpairs.df <- cleanTCRpairs.df %>%
+cleanTCRAgSpecificpairs.df <- cleanTCRAgSpecificpairs.df %>%
   mutate(cloneID = paste(fullLengthNTa, fullLengthNTb, sep = "_"))
 
 # Count how many cells per cloneID
-clone_counts <- cleanTCRpairs.df %>%
+clone_counts <- cleanTCRAgSpecificpairs.df %>%
   group_by(cloneID) %>%
   summarise(n_cells = n(), .groups = "drop")
 
@@ -2515,7 +2553,7 @@ expanded_clones <- clone_counts %>%
   pull(cloneID)
 
 # Annotate each cell as expanded or not
-cleanTCRpairs.df <- cleanTCRpairs.df %>%
+cleanTCRAgSpecificpairs.df <- cleanTCRAgSpecificpairs.df %>%
   mutate(expanded = cloneID %in% expanded_clones)
 
 # Add expansion info to Seurat metadata
@@ -2525,7 +2563,7 @@ metadata_Tconv <- seuratQCMergedCleaned@meta.data %>%
 
 # Merge with TCR info
 metadata_Tconv <- metadata_Tconv %>%
-  left_join(cleanTCRpairs.df %>% select(barcode, expanded), by = "barcode") %>%
+  left_join(cleanTCRAgSpecificpairs.df %>% select(barcode, expanded), by = "barcode") %>%
   mutate(expanded = ifelse(is.na(expanded), FALSE, expanded))
 
 # ---- NEW: Filter to only IAR and Microbial ----
@@ -2751,7 +2789,7 @@ airlinePlot <- function(seuratObj,
 # make subset Seurat object
 seurat.tmp <- subset(seuratQCMergedCleaned, subset = cellType %in% c("Treg", "Tconv")) # limit to just the Treg/Tconv cells. Exclude 'Other'
 seurat.tmp <- subset(seurat.tmp, subset = stimulationFigures == "IAR")
-
+# cleanTCRAgSpecificInterStimPairs.df
 # plot airline
 airlinePlot(seuratObj = seurat.tmp,
   tcrPairs = cleanTCRpairs.df,
@@ -2820,6 +2858,25 @@ airlinePlot(seuratObj = seurat.tmp,
   plotName = "DS_Microbial_AirlinePlot_CellType",
   minClones = 2)
 
+# inter-stimulation version
+# make subset Seurat object
+seurat.tmp <- subset(seuratQCMergedCleaned, subset = cellType %in% c("Treg", "Tconv")) # limit to just the Treg/Tconv cells. Exclude 'Other'
+
+# plot airline
+airlinePlot(seuratObj = seurat.tmp,
+  tcrPairs = cleanTCRAgSpecificInterStimPairs.df,
+  reductionName = "ref.umap_DS",
+  displayVariable = "cellType", # variable to color the UMAP by
+  arcLinewidth = 0.15,
+  arcAlpha = 0.8,
+  colorPalette = palCellType,
+  plotTitle = "Clone IDs with 2+ occurrences\nbetween stimulations", # string
+  colorString = "Cell Type", # string for the name of the legend
+  savePlot = TRUE,
+  plotName = "InterStimulation_AirlinePlot_CellType",
+  minClones = 2)
+
+
 # ---------------------Treg-only-----------------------------------------------------------
 # make subset Seurat object
 seurat.tmp <- subset(seuratQCMergedCleaned, subset = cellType %in% c("Treg")) # limit to just the Treg/Tconv cells. Exclude 'Other'
@@ -2873,6 +2930,24 @@ airlinePlot(seuratObj = seurat.tmp,
   colorString = "Cluster", # string for the name of the legend
   savePlot = TRUE,
   plotName = "Microbial_Treg_AirlinePlot_CellType",
+  minClones = 2)
+
+# inter stimulation version
+# make subset Seurat object
+seurat.tmp <- subset(seuratQCMergedCleaned, subset = cellType %in% c("Treg")) # limit to just the Treg/Tconv cells. Exclude 'Other'
+
+# plot airline
+airlinePlot(seuratObj = seurat.tmp,
+  tcrPairs = cleanTCRAgSpecificInterStimPairs.df,
+  reductionName = "ref.umap_Treg",
+  displayVariable = "seurat_clusters_Treg", # variable to color the UMAP by
+  arcLinewidth = 0.1,
+  arcAlpha = 0.5,
+  colorPalette = palRNAClustersTreg,
+  plotTitle = "Clone IDs with 2+ occurrences\nbetween stimulations", # string
+  colorString = "Cluster", # string for the name of the legend
+  savePlot = TRUE,
+  plotName = "InterStimulation_Treg_AirlinePlot_CellType",
   minClones = 2)
 
 
@@ -2931,7 +3006,575 @@ airlinePlot(seuratObj = seurat.tmp,
   plotName = "Microbial_Tconv_AirlinePlot_CellType",
   minClones = 2)
 
+# inter stimulation version
+# make subset Seurat object
+seurat.tmp <- subset(seuratQCMergedCleaned, subset = cellType %in% c("Tconv")) # limit to just the Treg/Tconv cells. Exclude 'Other'
+
+# plot airline
+airlinePlot(seuratObj = seurat.tmp,
+  tcrPairs = cleanTCRAgSpecificInterStimPairs.df,
+  reductionName = "ref.umap_Tconv",
+  displayVariable = "seurat_clusters_Tconv", # variable to color the UMAP by
+  arcLinewidth = 0.1,
+  arcAlpha = 0.5,
+  colorPalette = palRNAClustersTconv,
+  plotTitle = "Clone IDs with 2+ occurrences\nbetween stimulations", # string
+  colorString = "Cluster", # string for the name of the legend
+  savePlot = TRUE,
+  plotName = "InterStimulation_Tconv_AirlinePlot_CellType",
+  minClones = 2)
+
 
 rm_tmp(ask = FALSE)
 gc()
+```
+
+```{r TCRStatistics}
+# across-3 Chi-Squared test
+
+# make a temporary cleanTCRpairs.df so that we don't screw up our data
+cleanTCRAgSpecificpairs.df.tmp <- cleanTCRAgSpecificPairs.df
+
+# 1. Create a clone ID in your TCR dataframe (using fullLengthNT which combines both chains)
+cleanTCRAgSpecificpairs.df.tmp <- cleanTCRAgSpecificpairs.df.tmp %>%
+  mutate(cloneID = fullLengthNT)  # Use the combined sequence we created earlier
+
+# 2. Count how many cells per cloneID ACROSS ALL STIMULATIONS
+clone_counts <- cleanTCRAgSpecificpairs.df.tmp %>%
+  group_by(cloneID) %>%
+  summarise(
+    n_cells = n(),
+    stimulations_present = paste(unique(stimulationFigures), collapse = ", "),
+    .groups = "drop"
+  )
+
+# 3. Mark expanded clones (more than 1 cell ANYWHERE)
+expanded_clones <- clone_counts %>%
+  filter(n_cells > 1) %>%
+  pull(cloneID)
+
+cat("Total unique TCR sequences:", nrow(clone_counts), "\n")
+cat("Expanded TCR sequences (>1 cell anywhere):", length(expanded_clones), "\n")
+cat("Percentage of TCRs that are expanded:", round(100 * length(expanded_clones) / nrow(clone_counts), 2), "%\n")
+
+# Show some examples of expanded clones
+cat("\nExamples of expanded clones:\n")
+expanded_examples <- clone_counts %>%
+  filter(cloneID %in% expanded_clones) %>%
+  head(10)
+print(expanded_examples)
+
+# 4. Annotate each cell as expanded or not
+cleanTCRAgSpecificpairs.df.tmp <- cleanTCRAgSpecificpairs.df.tmp %>%
+  mutate(expanded = cloneID %in% expanded_clones)
+
+# Show expansion breakdown by stimulation
+expansion_by_stim <- cleanTCRAgSpecificpairs.df.tmp %>%
+  group_by(stimulationFigures) %>%
+  summarise(
+    total_cells = n(),
+    expanded_cells = sum(expanded),
+    expansion_percentage = round(100 * sum(expanded) / n(), 2),
+    .groups = "drop"
+  )
+
+cat("\nExpansion breakdown by stimulation:\n")
+print(expansion_by_stim)
+
+# Merge expanded status into Seurat metadata
+expanded_status <- cleanTCRAgSpecificpairs.df.tmp %>%
+  dplyr::select(barcode, expanded)
+
+# Subset cells
+seurat.tmp <- subset(seuratQCMergedCleaned, cellType %in% c("Treg", "Tconv"))
+
+# Add expanded status to Seurat metadata
+seurat.tmp$expanded <- expanded_status$expanded[match(
+  rownames(seurat.tmp@meta.data),
+  expanded_status$barcode
+)]
+
+# Create a contingency table of expanded vs not expanded by stimulation group
+table_expanded <- table(
+  seurat.tmp$stimulationFigures,
+  seurat.tmp$expanded
+)
+
+cat("\nContingency table (rows=stimulation, cols=expanded status):\n")
+print(table_expanded)
+
+# Calculate percentages for each stimulation
+percentages <- prop.table(table_expanded, margin = 1) * 100
+cat("\nExpansion percentages by stimulation:\n")
+print(round(percentages, 2))
+
+# Perform Chi-Squared Test
+chisq_test <- chisq.test(table_expanded)
+
+cat("\nChi-squared test results:\n")
+print(chisq_test)
+
+# Analysis of expanded TCRs by stimulation combination
+cat("\n", paste(rep("=", 60), collapse = ""), "\n")
+cat("EXPANDED TCR ANALYSIS BY STIMULATION COMBINATION\n")
+cat(paste(rep("=", 60), collapse = ""), "\n")
+
+# Get the expanded TCRs (those appearing >1 time across all stimulations)
+expanded_tcr_sequences <- expanded_clones
+
+# For each expanded TCR, determine which stimulation combinations it appears in
+expanded_tcr_combinations <- cleanTCRAgSpecificpairs.df.tmp %>%
+  filter(cloneID %in% expanded_tcr_sequences) %>%
+  group_by(cloneID) %>%
+  summarise(
+    total_cells = n(),
+    has_Microbial = any(stimulationFigures == "Microbial"),
+    has_IAR = any(stimulationFigures == "IAR"),
+    has_Polyclonal = any(stimulationFigures == "Polyclonal"),
+    stimulations_present = paste(unique(stimulationFigures), collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # Create standardized combination labels
+    combination = case_when(
+      has_Microbial & has_IAR & has_Polyclonal ~ "Microbial + IAR + Polyclonal",
+      has_Microbial & has_IAR & !has_Polyclonal ~ "Microbial + IAR",
+      has_Microbial & !has_IAR & has_Polyclonal ~ "Microbial + Polyclonal",
+      !has_Microbial & has_IAR & has_Polyclonal ~ "IAR + Polyclonal",
+      has_Microbial & !has_IAR & !has_Polyclonal ~ "Microbial only",
+      !has_Microbial & has_IAR & !has_Polyclonal ~ "IAR only",
+      !has_Microbial & !has_IAR & has_Polyclonal ~ "Polyclonal only",
+      TRUE ~ "Error"
+    )
+  )
+
+# Summary of expanded TCRs by combination
+expanded_combination_summary <- expanded_tcr_combinations %>%
+  group_by(combination) %>%
+  summarise(
+    n_expanded_tcrs = n(),
+    total_cells = sum(total_cells),
+    avg_cells_per_tcr = round(total_cells / n_expanded_tcrs, 2),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n_expanded_tcrs))
+
+cat("Summary of expanded TCRs by stimulation combination:\n")
+print(expanded_combination_summary)
+
+# For each individual stimulation, show breakdown of its expanded TCRs by combination
+for (stim in c("Microbial", "IAR", "Polyclonal")) {
+  cat("\n", paste(rep("-", 40), collapse = ""), "\n")
+  cat("EXPANDED TCRs in", stim, "stimulation by combination:\n")
+  cat(paste(rep("-", 40), collapse = ""), "\n")
+
+  # Get all TCRs present in this stimulation that are also expanded
+  stim_expanded_tcrs <- cleanTCRAgSpecificpairs.df.tmp %>%
+    filter(stimulationFigures == stim, expanded == TRUE) %>%
+    pull(cloneID) %>%
+    unique()
+
+  # Get their combination breakdown
+  stim_combination_breakdown <- expanded_tcr_combinations %>%
+    filter(cloneID %in% stim_expanded_tcrs) %>%
+    group_by(combination) %>%
+    summarise(
+      n_expanded_tcrs = n(),
+      total_cells = sum(total_cells),
+      .groups = "drop"
+    ) %>%
+    arrange(desc(n_expanded_tcrs))
+
+  # Add percentages
+  stim_combination_breakdown <- stim_combination_breakdown %>%
+    mutate(
+      percentage_of_expanded_tcrs = round(100 * n_expanded_tcrs / sum(n_expanded_tcrs), 2),
+      percentage_of_expanded_cells = round(100 * total_cells / sum(total_cells), 2)
+    )
+
+  cat("Total expanded TCRs in", stim, ":", length(stim_expanded_tcrs), "\n")
+  cat("Breakdown by combination:\n")
+  print(stim_combination_breakdown)
+}
+
+# Overall summary
+cat("\n", paste(rep("=", 60), collapse = ""), "\n")
+cat("OVERALL SUMMARY\n")
+cat(paste(rep("=", 60), collapse = ""), "\n")
+
+total_expanded_tcrs <- length(expanded_tcr_sequences)
+multi_stim_expanded <- expanded_tcr_combinations %>%
+  filter(combination != "Microbial only" & combination != "IAR only" & combination != "Polyclonal only") %>%
+  nrow()
+
+cat("Total expanded TCR sequences:", total_expanded_tcrs, "\n")
+cat("Expanded TCRs in single stimulation only:", total_expanded_tcrs - multi_stim_expanded, "\n")
+cat("Expanded TCRs in multiple stimulations:", multi_stim_expanded, "\n")
+cat("Percentage of expanded TCRs that are multi-stimulation:",
+  round(100 * multi_stim_expanded / total_expanded_tcrs, 2), "%\n")
+
+# Save all tables to Excel file
+cat("\n", paste(rep("=", 60), collapse = ""), "\n")
+cat("SAVING ANALYSIS TABLES TO EXCEL\n")
+cat(paste(rep("=", 60), collapse = ""), "\n")
+
+# Create list of tables to save
+tables_to_save <- list()
+
+# 1. Overall expanded combination summary
+tables_to_save[["Overall_Expanded_Summary"]] <- expanded_combination_summary
+
+# 2. Expansion breakdown by stimulation
+tables_to_save[["Expansion_by_Stimulation"]] <- expansion_by_stim
+
+# 3. Contingency table (convert to dataframe)
+contingency_df <- as.data.frame.matrix(table_expanded)
+contingency_df$Stimulation <- rownames(contingency_df)
+contingency_df <- contingency_df[, c("Stimulation", names(contingency_df)[names(contingency_df) != "Stimulation"])]
+tables_to_save[["Contingency_Table"]] <- contingency_df
+
+# 4. Expansion percentages by stimulation
+percentages_df <- as.data.frame.matrix(percentages)
+percentages_df$Stimulation <- rownames(percentages_df)
+percentages_df <- percentages_df[, c("Stimulation", names(percentages_df)[names(percentages_df) != "Stimulation"])]
+tables_to_save[["Expansion_Percentages"]] <- percentages_df
+
+# 5. Individual stimulation breakdowns
+for (stim in c("Microbial", "IAR", "Polyclonal")) {
+  # Get the breakdown for this stimulation
+  stim_expanded_tcrs <- cleanTCRAgSpecificpairs.df.tmp %>%
+    filter(stimulationFigures == stim, expanded == TRUE) %>%
+    pull(cloneID) %>%
+    unique()
+
+  stim_combination_breakdown <- expanded_tcr_combinations %>%
+    filter(cloneID %in% stim_expanded_tcrs) %>%
+    group_by(combination) %>%
+    summarise(
+      n_expanded_tcrs = n(),
+      total_cells = sum(total_cells),
+      .groups = "drop"
+    ) %>%
+    arrange(desc(n_expanded_tcrs)) %>%
+    mutate(
+      percentage_of_expanded_tcrs = round(100 * n_expanded_tcrs / sum(n_expanded_tcrs), 2),
+      percentage_of_expanded_cells = round(100 * total_cells / sum(total_cells), 2)
+    )
+
+  # Clean up sheet name (Excel doesn't like certain characters)
+  sheet_name <- paste0(stim, "_Breakdown")
+  tables_to_save[[sheet_name]] <- stim_combination_breakdown
+}
+
+# 6. Chi-squared test results (create a summary dataframe)
+chisq_summary <- data.frame(
+  Statistic = c("Chi-squared", "Degrees of freedom", "P-value"),
+  Value = c(chisq_test$statistic, chisq_test$parameter, chisq_test$p.value)
+)
+tables_to_save[["ChiSquared_Results"]] <- chisq_summary
+
+# 7. Overall summary statistics
+overall_summary <- data.frame(
+  Metric = c(
+    "Total_expanded_TCRs",
+    "Single_stimulation_expanded_TCRs",
+    "Multi_stimulation_expanded_TCRs",
+    "Percentage_multi_stimulation"
+  ),
+  Value = c(
+    total_expanded_tcrs,
+    total_expanded_tcrs - multi_stim_expanded,
+    multi_stim_expanded,
+    round(100 * multi_stim_expanded / total_expanded_tcrs, 2)
+  )
+)
+tables_to_save[["Summary_Statistics"]] <- overall_summary
+
+# Save to Excel file
+excel_filename <- file.path(dataOutputDir, paste0(Sys.Date(), "_TCR_Expansion_Analysis.xlsx"))
+
+# Use openxlsx to write multiple sheets
+wb <- createWorkbook()
+
+for (sheet_name in names(tables_to_save)) {
+  addWorksheet(wb, sheet_name)
+  writeData(wb, sheet_name, tables_to_save[[sheet_name]], rowNames = FALSE)
+}
+
+saveWorkbook(wb, excel_filename, overwrite = TRUE)
+
+cat("Analysis tables saved to:", excel_filename, "\n")
+cat("Excel file contains", length(tables_to_save), "sheets:\n")
+for (i in 1:length(names(tables_to_save))) {
+  cat("  ", i, ".", names(tables_to_save)[i], "\n")
+}
+
+
+
+
+
+# Tregs
+seurat.tmp <- subset(seuratQCMergedCleaned, cellType %in% c("Treg"))
+
+# Add to Seurat metadata
+seurat.tmp$expanded <- expanded_status$expanded[match(
+  rownames(seurat.tmp@meta.data),
+  expanded_status$barcode
+)]
+
+# Table of expanded vs not expanded by stimulation group
+table_expanded <- table(
+  seurat.tmp$stimulationFigures,
+  seurat.tmp$expanded
+)
+
+# Calculate percentages
+percent_expanded <- prop.table(table_expanded, 1)[, "TRUE"] * 100
+percent_expanded
+
+# For each pairwise comparison:
+get_fisher_table <- function(group1, group2) {
+  tab <- table(
+    seurat.tmp$stimulationFigures,
+    seurat.tmp$expanded
+  )
+  # Only keep rows for the two groups
+  tab2 <- tab[c(group1, group2), ]
+  # Remove NAs if present
+  tab2 <- tab2[, c("TRUE", "FALSE"), drop = FALSE]
+  return(tab2)
+}
+
+# Microbial vs Polyclonal
+tab_micro_polyclonal <- get_fisher_table("Microbial", "Polyclonal")
+fisher.test(tab_micro_polyclonal)
+
+# IAR vs Polyclonal
+tab_iar_polyclonal <- get_fisher_table("IAR", "Polyclonal")
+fisher.test(tab_iar_polyclonal)
+
+# Microbial vs IAR
+tab_micro_iar <- get_fisher_table("Microbial", "IAR")
+fisher.test(tab_micro_iar)
+
+pvals <- c(
+  fisher.test(tab_micro_polyclonal)$p.value,
+  fisher.test(tab_iar_polyclonal)$p.value,
+  fisher.test(tab_micro_iar)$p.value
+)
+
+# Bonferroni correction
+p.adjust(pvals, method = "bonferroni")
+
+# Benjamini-Hochberg correction
+p.adjust(pvals, method = "BH")
+
+comparisons <- c("Microbial vs Polyclonal", "IAR vs Polyclonal", "Microbial vs IAR")
+results_df <- data.frame(
+  Comparison = comparisons,
+  P_value = pvals,
+  P_adj_bonferroni = p.adjust(pvals, method = "bonferroni"),
+  P_adj_BH = p.adjust(pvals, method = "BH")
+)
+print(results_df)
+
+
+
+# Tconv
+seurat.tmp <- subset(seuratQCMergedCleaned, cellType %in% c("Tconv"))
+
+# Add to Seurat metadata
+seurat.tmp$expanded <- expanded_status$expanded[match(
+  rownames(seurat.tmp@meta.data),
+  expanded_status$barcode
+)]
+
+# Table of expanded vs not expanded by stimulation group
+table_expanded <- table(
+  seurat.tmp$stimulationFigures,
+  seurat.tmp$expanded
+)
+
+# Calculate percentages
+percent_expanded <- prop.table(table_expanded, 1)[, "TRUE"] * 100
+percent_expanded
+
+# For each pairwise comparison:
+get_fisher_table <- function(group1, group2) {
+  tab <- table(
+    seurat.tmp$stimulationFigures,
+    seurat.tmp$expanded
+  )
+  # Only keep rows for the two groups
+  tab2 <- tab[c(group1, group2), ]
+  # Remove NAs if present
+  tab2 <- tab2[, c("TRUE", "FALSE"), drop = FALSE]
+  return(tab2)
+}
+
+# Microbial vs Polyclonal
+tab_micro_polyclonal <- get_fisher_table("Microbial", "Polyclonal")
+fisher.test(tab_micro_polyclonal)
+
+# IAR vs Polyclonal
+tab_iar_polyclonal <- get_fisher_table("IAR", "Polyclonal")
+fisher.test(tab_iar_polyclonal)
+
+# Microbial vs IAR
+tab_micro_iar <- get_fisher_table("Microbial", "IAR")
+fisher.test(tab_micro_iar)
+
+pvals <- c(
+  fisher.test(tab_micro_polyclonal)$p.value,
+  fisher.test(tab_iar_polyclonal)$p.value,
+  fisher.test(tab_micro_iar)$p.value
+)
+
+# Bonferroni correction
+p.adjust(pvals, method = "bonferroni")
+
+# Benjamini-Hochberg correction
+p.adjust(pvals, method = "BH")
+
+comparisons <- c("Microbial vs Polyclonal", "IAR vs Polyclonal", "Microbial vs IAR")
+results_df <- data.frame(
+  Comparison = comparisons,
+  P_value = pvals,
+  P_adj_bonferroni = p.adjust(pvals, method = "bonferroni"),
+  P_adj_BH = p.adjust(pvals, method = "BH")
+)
+print(results_df)
+```
+
+```{r cellCounts}
+# numbers of cells per donorIdFigures by $cellType, $stimulationFigures, and $seurat_clusters_DS
+
+# Extract metadata
+metadata <- seuratQCMergedCleaned@meta.data
+
+# replace "Other" in $cellType with "Not Ag-specific"
+metadata$cellType <- ifelse(metadata$cellType == "Other", "Not Ag-specific", metadata$cellType)
+
+# Create comprehensive cell count table
+cell_counts <- metadata %>%
+  group_by(donorIdFigures, cellType, stimulationFigures, seurat_clusters_DS) %>%
+  summarise(cell_count = n(), .groups = "drop") %>%
+  arrange(donorIdFigures, cellType, stimulationFigures, seurat_clusters_DS)
+
+# Create a summary table with totals
+summary_counts <- list(
+  # Detailed breakdown
+  "Detailed_Counts" = cell_counts,
+
+  # Total cells per donor by cell type and stimulation
+  "Donor_CellType_Stim" = metadata %>%
+    group_by(donorIdFigures, cellType, stimulationFigures) %>%
+    summarise(cell_count = n(), .groups = "drop") %>%
+    arrange(donorIdFigures, cellType, stimulationFigures),
+
+  # Total cells per donor by cell type
+  "Donor_CellType" = metadata %>%
+    group_by(donorIdFigures, cellType) %>%
+    summarise(cell_count = n(), .groups = "drop") %>%
+    arrange(donorIdFigures, cellType),
+
+  # Total cells per donor by stimulation
+  "Donor_Stimulation" = metadata %>%
+    group_by(donorIdFigures, stimulationFigures) %>%
+    summarise(cell_count = n(), .groups = "drop") %>%
+    arrange(donorIdFigures, stimulationFigures),
+
+  # Total cells per donor by cluster
+  "Donor_Cluster" = metadata %>%
+    group_by(donorIdFigures, seurat_clusters_DS) %>%
+    summarise(cell_count = n(), .groups = "drop") %>%
+    arrange(donorIdFigures, seurat_clusters_DS),
+
+  # Overall totals per donor
+  "Donor_Totals" = metadata %>%
+    group_by(donorIdFigures) %>%
+    summarise(total_cells = n(), .groups = "drop") %>%
+    arrange(donorIdFigures)
+)
+
+# Create filename with timestamp
+filename <- file.path(dataOutputDir, paste0(filenameSuffix, "CellCounts_Breakdown.xlsx"))
+
+# Write to Excel with multiple sheets
+write.xlsx(summary_counts, file = filename, rowNames = FALSE)
+
+# Print summary to console
+cat("Cell count summary saved to:", filename, "\n\n")
+cat("Total cells in dataset:", nrow(metadata), "\n")
+cat("Number of donors:", length(unique(metadata$donorIdFigures)), "\n")
+cat("Cell types:", paste(unique(metadata$cellType), collapse = ", "), "\n")
+cat("Stimulations:", paste(unique(metadata$stimulationFigures), collapse = ", "), "\n")
+cat("Number of clusters:", length(unique(metadata$seurat_clusters_DS)), "\n\n")
+
+# Print sample of detailed counts
+cat("Sample of detailed cell counts:\n")
+print(head(cell_counts, 10))
+
+# Print totals by cell type and stimulation
+cat("\nTotals by cell type and stimulation:\n")
+totals_summary <- metadata %>%
+  group_by(cellType, stimulationFigures) %>%
+  summarise(total_cells = n(), .groups = "drop") %>%
+  arrange(cellType, stimulationFigures)
+print(totals_summary)
+
+
+# Create a second Excel file with transposed layout (donors as columns, categories as rows)
+
+# 1. Cell type breakdown by donor
+celltype_by_donor <- metadata %>%
+  group_by(donorIdFigures, cellType) %>%
+  summarise(cell_count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = donorIdFigures, values_from = cell_count, values_fill = 0)
+
+# 2. Stimulation breakdown by donor
+stimulation_by_donor <- metadata %>%
+  group_by(donorIdFigures, stimulationFigures) %>%
+  summarise(cell_count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = donorIdFigures, values_from = cell_count, values_fill = 0)
+
+# 3. Cluster breakdown by donor
+cluster_by_donor <- metadata %>%
+  group_by(donorIdFigures, seurat_clusters_DS) %>%
+  summarise(cell_count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = donorIdFigures, values_from = cell_count, values_fill = 0) %>%
+  rename(category = seurat_clusters_DS) %>%
+  mutate(category = paste("Cluster", category))
+
+# 4. Total cells per donor
+total_by_donor <- metadata %>%
+  group_by(donorIdFigures) %>%
+  summarise(total_cells = n(), .groups = "drop") %>%
+  pivot_wider(names_from = donorIdFigures, values_from = total_cells) %>%
+  mutate(cellType = "Total") %>%
+  select(cellType, everything())
+
+# Rename columns to match
+colnames(celltype_by_donor)[1] <- "category"
+colnames(stimulation_by_donor)[1] <- "category"
+colnames(total_by_donor)[1] <- "category"
+
+# Combine all tables into one
+final_table <- bind_rows(
+  celltype_by_donor,
+  stimulation_by_donor,
+  cluster_by_donor,
+  total_by_donor
+)
+
+# Create filename for single sheet version
+filename_single <- file.path(dataOutputDir, paste0(filenameSuffix, "CellCountsCombined.xlsx"))
+
+# Write to Excel as a single sheet
+write.xlsx(final_table, file = filename_single, rowNames = FALSE)
+
+# Print summary
+cat("\nSingle table cell count summary saved to:", filename_single, "\n")
+cat("Layout: Single sheet with donors as columns, categories as separate row groups\n")
+cat("Total rows:", nrow(final_table), "\n")
 ```

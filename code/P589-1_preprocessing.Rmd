@@ -95,7 +95,7 @@ baseDir <- "/Users/tedwards/Documents/projects/P589-1_Cerosaletti_Chen_foreign_a
 dataInputDir <- file.path(baseDir, "data/input")
 plotDir <- file.path(baseDir, "figures")
 dataOutputDir <- file.path(baseDir, "data/output")
-dataDate <- "2025-06-09"
+dataDate <- "2025-07-24"
 filenameSuffix <- paste0("P589-1_autoreactive_CD4_Tcell_10X.", dataDate, "_")
 
 P589_1Samples <- c("pool589-1_1",
@@ -325,6 +325,94 @@ savePlot <- function(
     dev.off()
   }
 }
+
+# Remove cells with: a) 3+ alphas, b) cells with 2 alphas and 2 betas, and c) 2 betas
+# Remove iNKT and MAIT cells
+callMultiplets <- function(tcrs,
+                           nAlphaCut = 3,
+                           nBetaCut = 2,
+                           alphaAndBetaCut = 2,
+                           callINKT = TRUE,
+                           callMAIT = TRUE) {
+  # Count chains
+  chainCounts <- tcrs %>%
+    dplyr::group_by(barcode) %>%
+    dplyr::summarise(nAlpha = sum(chain ==  "TRA"),
+      nBeta = sum(chain == "TRB"))
+
+  multiplets <- chainCounts %>%
+    dplyr::filter(nAlpha > nAlphaCut |
+      nBeta > nBetaCut |
+      (nAlpha >= alphaAndBetaCut & nBeta >= alphaAndBetaCut))
+
+  tcrs$multiplet <- tcrs$barcode %in% multiplets$barcode
+
+  if (callMAIT == TRUE) {
+    tcrs <- tcrs %>%
+      dplyr::mutate(isMAIT = (str_detect(v_gene, "TRAV1-2") &
+        str_detect(j_gene, "TRAJ(33|12|20)")))
+  }
+
+  if (callINKT == TRUE) {
+    tcrs <- tcrs %>%
+      dplyr::mutate(isINKT = (str_detect(v_gene, "TRAV10") &
+        str_detect(j_gene, "TRAJ18")))
+  }
+  return(tcrs)
+}
+
+# finds all pairs of alpha/beta TCRs
+# TCRs is a dataframe that has a detected TCR chain for each row (alpha or beta or gamma, etc.) This is the output of mixcr, and maybe something analogous for 10x. But the columns might be named something different for 10x.
+# adapted from A.Hu code
+combinePairs <- function(tcrDf) {
+  a <- tcrDf[tcrDf$chain %in% c("TRA", "a"), ]
+  b <- tcrDf[tcrDf$chain %in% c("TRB", "b"), ]
+  commonbarcodes <- intersect(a$barcode, b$barcode) # get barcodes that have both an alpha or beta chain
+  a <- a[a$barcode %in% commonbarcodes, ]
+  b <- b[b$barcode %in% commonbarcodes, ]
+
+  # Compute how many alpha/beta pairs there should be
+  atab <- table(a$barcode)
+  btab <- table(b$barcode)
+  nPairs <- sum(atab[commonbarcodes] * btab[commonbarcodes])
+
+  # Initialize the pairs data frame
+  pairs <- data.frame(CDR3b = rep("", nPairs),
+    CDR3bnt = rep("", nPairs),
+    TRBV = rep("", nPairs),
+    TRBJ = rep("", nPairs),
+    CDR3a = rep("", nPairs),
+    CDR3ant = rep("", nPairs),
+    TRAV = rep("", nPairs),
+    TRAJ = rep("", nPairs),
+    barcode = rep("", nPairs),
+    fullLengthNTa = rep("", nPairs),
+    fullLengthNTb = rep("", nPairs))
+
+  # Iterate through the TCR alphas and betas and fill out the pair dataframe
+  k <- 1
+  for (barcode in commonbarcodes) {
+    arows <- which(a$barcode == barcode)
+    brows <- which(b$barcode == barcode)
+    for (i in arows) {
+      for (j in brows) {
+        pairs[k, ] <- c(b$cdr3[j],
+          b$cdr3_nt[j],
+          b$v_gene[j],
+          b$j_gene[j],
+          a$cdr3[i],
+          a$cdr3_nt[i],
+          a$v_gene[i],
+          a$j_gene[i],
+          barcode,
+          a$fullLengthNT[i],
+          b$fullLengthNT[j])
+        k <- k + 1
+      }
+    }
+  }
+  return(pairs)
+}
 ```
 
 ```{r read10XGEXDataFromAllFlowcells}
@@ -507,55 +595,19 @@ TCRs.df$fullLengthNT <- paste0(TCRs.df$fwr1_nt,
 TCRs.df$fullLengthAA <- paste(TCRs.df$v_gene, TCRs.df$cdr3, TCRs.df$j_gene, sep = "_")
 ```
 
-```{r callMultipletsFunctionDefinition}
-# Remove cells with: a) 3+ alphas, b) cells with 2 alphas and 2 betas, and c) 2 betas
-# Remove iNKT and MAIT cells
-callMultiplets <- function(tcrs,
-                           nAlphaCut = 3,
-                           nBetaCut = 2,
-                           alphaAndBetaCut = 2,
-                           callINKT = TRUE,
-                           callMAIT = TRUE) {
-  # Count chains
-  chainCounts <- tcrs %>%
-    dplyr::group_by(barcode) %>%
-    dplyr::summarise(nAlpha = sum(chain ==  "TRA"),
-      nBeta = sum(chain == "TRB"))
-
-  multiplets <- chainCounts %>%
-    dplyr::filter(nAlpha > nAlphaCut |
-      nBeta > nBetaCut |
-      (nAlpha >= alphaAndBetaCut & nBeta >= alphaAndBetaCut))
-
-  tcrs$multiplet <- tcrs$barcode %in% multiplets$barcode
-
-  if (callMAIT == TRUE) {
-    tcrs <- tcrs %>%
-      dplyr::mutate(isMAIT = (str_detect(v_gene, "TRAV1-2") &
-        str_detect(j_gene, "TRAJ(33|12|20)")))
-  }
-
-  if (callINKT == TRUE) {
-    tcrs <- tcrs %>%
-      dplyr::mutate(isINKT = (str_detect(v_gene, "TRAV10") &
-        str_detect(j_gene, "TRAJ18")))
-  }
-  return(tcrs)
-}
-```
-
 ```{r callAndCleanMultipletsFromTCRs}
 # call multiplets
 TCRs.df <- callMultiplets(TCRs.df,
-  nAlphaCut = 3,
-  nBetaCut = 2,
-  alphaAndBetaCut = 2,
+  nAlphaCut = 3, # 3 or more alpha chains is a suspected multiplet
+  nBetaCut = 2, # 2 or more beta chains is a suspected multiplet
+  alphaAndBetaCut = 2, # 2 alpha and beta chains is considered a multiplet (redundant in this case with nBetacut, but in some cases we might want more flexibility)
   callINKT = TRUE,
   callMAIT = TRUE)
 
-# 77 MAIT
-# 153 MAIT
-# 4260 multiplets
+# TCR chains to exclude:
+# # 77 MAIT
+# # 153 MAIT
+# # 4260 multiplets
 
 # for filtering the seurat object later
 barcodesToFilter <- TCRs.df$barcode[which(TCRs.df$multiplet |
@@ -571,59 +623,10 @@ cleanTCRs.df <- TCRs.df %>%
 
 ```{r alexHuCallPairsCode}
 # finds all pairs of alpha/beta TCRs
-# TCRs is a dataframe that has a detected TCR chain for each row (alpha or beta or gamma, etc.) This is the output of mixcr, and maybe something analogous for 10x. But the columns might be named something different for 10x.
-# adapted from A.Hu code
-combinePairs <- function(tcrDf) {
-  a <- tcrDf[tcrDf$chain %in% c("TRA", "a"), ]
-  b <- tcrDf[tcrDf$chain %in% c("TRB", "b"), ]
-  commonbarcodes <- intersect(a$barcode, b$barcode) # get barcodes that have both an alpha or beta chain
-  a <- a[a$barcode %in% commonbarcodes, ]
-  b <- b[b$barcode %in% commonbarcodes, ]
-
-  # Compute how many alpha/beta pairs there should be
-  atab <- table(a$barcode)
-  btab <- table(b$barcode)
-  nPairs <- sum(atab[commonbarcodes] * btab[commonbarcodes])
-
-  # Initialize the pairs data frame
-  pairs <- data.frame(CDR3b = rep("", nPairs),
-    CDR3bnt = rep("", nPairs),
-    TRBV = rep("", nPairs),
-    TRBJ = rep("", nPairs),
-    CDR3a = rep("", nPairs),
-    CDR3ant = rep("", nPairs),
-    TRAV = rep("", nPairs),
-    TRAJ = rep("", nPairs),
-    barcode = rep("", nPairs),
-    fullLengthNTa = rep("", nPairs),
-    fullLengthNTb = rep("", nPairs))
-
-  # Iterate through the TCR alphas and betas and fill out the pair dataframe
-  k <- 1
-  for (barcode in commonbarcodes) {
-    arows <- which(a$barcode == barcode)
-    brows <- which(b$barcode == barcode)
-    for (i in arows) {
-      for (j in brows) {
-        pairs[k, ] <- c(b$cdr3[j],
-          b$cdr3_nt[j],
-          b$v_gene[j],
-          b$j_gene[j],
-          a$cdr3[i],
-          a$cdr3_nt[i],
-          a$v_gene[i],
-          a$j_gene[i],
-          barcode,
-          a$fullLengthNT[i],
-          b$fullLengthNT[j])
-        k <- k + 1
-      }
-    }
-  }
-  return(pairs)
-}
-
 cleanTCRpairs.df <- combinePairs(cleanTCRs.df)
+
+# create $fullLengthNT that concatenates $fullLengthNTa and $fullLengthNTb
+cleanTCRpairs.df$fullLengthNT <- paste0(cleanTCRpairs.df$fullLengthNTa, cleanTCRpairs.df$fullLengthNTb)
 ```
 
 ```{r add_qc_metrics_anno}
@@ -851,8 +854,6 @@ palPool <- c("1" = "darkgreen", "2" = "darkorange4")
 ```
 
 ```{r checkForTCRGenesPreQC}
-library(openxlsx)
-
 # TRA, TRB, TRGC1, TRGC2, TRDC
 # TRAV24, TRAJ18, TRAV7-2,
 # merge Seurat objects
@@ -1292,8 +1293,29 @@ print(umap_plot)
 invisible(dev.off())
 ```
 
+```{r TCRQCAccounting}
+# how many cell barcodes flagged by TCR QC were already eliminated by previous QC?
+# setup $barcode in the metadata
+DefaultAssay(seuratQCMerged) <- "RNA"
+seuratQCMerged@meta.data$barcode <- rownames(seuratQCMerged@meta.data)
+
+# Number of barcodes called multiplets by TCR analysis that weren't already removed
+barcodesToFilterMultiplet <- TCRs.df$barcode[which(TCRs.df$multiplet)]
+barcodesToFilterINKT <- TCRs.df$barcode[which(TCRs.df$isINKT)]
+barcodesToFilterMAIT <- TCRs.df$barcode[which(TCRs.df$isMAIT)]
+
+nNewMultipletsByTCR <- length(intersect(unique(barcodesToFilterMultiplet), seuratQCMerged@meta.data$barcode))
+print(paste("New multiplets identified by TCR analysis that were not excluded by prior QC:", nNewMultipletsByTCR))
+
+nINKTByTCR <- length(intersect(unique(barcodesToFilterINKT), seuratQCMerged@meta.data$barcode))
+print(paste("iNKT that were not already excluded by prior QC:", nINKTByTCR))
+
+nMAITByTCR <- length(intersect(unique(barcodesToFilterMAIT), seuratQCMerged@meta.data$barcode))
+print(paste("MAIT that were not already excluded by prior QC:", nMAITByTCR))
+```
+
 ```{r cleanSeuratWithTCRData}
-# removes iNKT cells, mait cells, and TCR multiplets
+# removes iNKT cells, MAIT cells, and TCR multiplets
 seuratQCMerged <- subset(seuratQCMerged, cells = barcodesToFilter, invert = TRUE)
 ```
 
@@ -1578,7 +1600,7 @@ print("Cluster markers found:")
 print(clusterMarkers[[paste0("RNA_", clusterName[["RNA"]])]])
 ```
 
-```{r addMetaDataToTCRs}
+```{r cleanAndAddMetaDataToTCRs}
 # remove barcodes from cleanTCRs.df and cleanTCRpairs.df that aren't present in seuratQCMergedCleaned
 cleanTCRs.df <- cleanTCRs.df %>%
   dplyr::filter(barcode %in% seuratQCMergedCleaned@meta.data$barcode)
@@ -1590,12 +1612,19 @@ cleanTCRpairs.df <- cleanTCRpairs.df %>%
 metaData.df.tmp <- seuratQCMergedCleaned@meta.data
 
 cleanTCRs.df <- cleanTCRs.df %>%
-  left_join(metaData.df.tmp %>% dplyr::select(barcode, stimulationFigures, donorIdFigures), by = "barcode")
+  left_join(metaData.df.tmp %>% dplyr::select(barcode, stimulationFigures, donorIdFigures, studyGroup), by = "barcode")
 
 cleanTCRpairs.df <- cleanTCRpairs.df %>%
-  left_join(metaData.df.tmp %>% dplyr::select(barcode, stimulationFigures, donorIdFigures), by = "barcode")
+  left_join(metaData.df.tmp %>% dplyr::select(barcode, stimulationFigures, donorIdFigures, studyGroup), by = "barcode")
 
 rm_tmp(ask = FALSE)
+
+# check that we don't have any barcodes that were previously removed from the Seurat object
+# length(intersect(unique(seuratQCMergedCleaned@meta.data$barcode), unique(cleanTCRs.df$barcode)))
+# [1] 29868
+# r$> length(unique(cleanTCRs.df$barcode))
+# [1] 29868
+# nice
 ```
 
 ```{r loadCellTypistResultsAndAddToSeurat}
@@ -1751,7 +1780,7 @@ cellCounts.tmp <- seuratQCMergedCleaned@meta.data %>%
   pivot_wider(names_from = stimulation, values_from = cell_count, values_fill = list(cell_count = 0))
 
 # Print the table
-# print(cellCounts.tmp)
+print(cellCounts.tmp)
 #   donorId               CD3CD28  CEFX Islet
 #   <chr>                   <int> <int> <int>
 # 1 CerosalettiLab1059994      42  1392   110
@@ -1760,9 +1789,6 @@ cellCounts.tmp <- seuratQCMergedCleaned@meta.data %>%
 # 4 CerosalettiLab632811      598  1315   384
 # 5 CerosalettiLab839987      274  8188   237
 # 6 CerosalettiLab942655      435 12291   244
-
-# set # of CEFX cells to downsample to
-# nCEFXDownsample <- 600 # 1300
 
 # Calculate the mean of the cell count for CD3CD28 and Islet cells per donor
 meanCellCounts.tmp <- cellCounts.tmp %>%
@@ -1842,6 +1868,15 @@ cellCountsDS.tmp <- seuratQCMergedCleanedDS@meta.data %>%
 
 print(cellCountsDS.tmp)
 
+#   donorIdFigures Microbial   IAR Polyclonal
+#   <fct>              <int> <int>      <int>
+# 1 1_Control            110   110         42
+# 2 3_Control            236   236        488
+# 3 4_Control            384   384        598
+# 4 2_T1D                152   152        159
+# 5 5_T1D                237   237        274
+# 6 6_T1D                244   244        435
+
 rm_tmp(ask = FALSE)
 ```
 
@@ -1892,7 +1927,7 @@ hyperParamGridPCA.df <- expand.grid(
 min.dist.vector <-  c(0.1, 0.2) # c(0.001, 0.01, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1)
 n_neighbors.vector <- c(5, 20) # c(5, 20, 30, 40, 50)
 
-result <- optimizeRNAseqClustering(seuratObject,
+result <- optimizeRNAseqClustering(seuratQCMergedCleanedDS,
   hyperParamGridPCA.df,
   min.dist.vector,
   n_neighbors.vector,
@@ -2269,21 +2304,15 @@ seuratQCMergedCleaned$cellTypeTotalSeq[
 seuratQCMergedCleaned$cellTypeTotalSeq[
   seuratQCMergedCleaned$HT_names %in% cellsTconv
 ] <- "Tconv"
+
+metaData.df.tmp <- seuratQCMergedCleaned@meta.data
+
+cleanTCRs.df <- cleanTCRs.df %>%
+  left_join(metaData.df.tmp %>% dplyr::select(barcode, cellType), by = "barcode")
+
+cleanTCRpairs.df <- cleanTCRpairs.df %>%
+  left_join(metaData.df.tmp %>% dplyr::select(barcode, cellType), by = "barcode")
 ```
-
-# ```{r addCellTypeTocleanTCRs.df}
-# # Use the rownames as barcode identifiers
-# metadataSubset.tmp <- seuratQCMergedCleaned@meta.data
-# metadataSubset.tmp$barcode <- rownames(metadataSubset.tmp)
-
-# # Merge cleanTCRs.df with this updated metadata subset using the "barcode" column
-# cleanTCRs.df <- merge(cleanTCRs.df, metadataSubset.tmp[, c("barcode", "cellType", "donorIdFigures", "pool", "stimulationFigures")],
-#   by = "barcode", all.x = TRUE)
-
-# cleanTCRs.df$pool <- as.character(cleanTCRs.df$pool)
-
-# rm_tmp(ask = FALSE)
-# ```
 
 ```{r clusterTregCellsSeparately}
 # make a subset seurat object that only contains the cells where $cellType == "Treg"
@@ -2992,52 +3021,6 @@ hyperParamGridClusterOnly.df <- resultTconv$hyperParamGridClusterOnly.df
 
 write.xlsx(hyperParamGridOptClusterAndUMAP.df, file = file.path(dataOutputDir, "20250611_RNA_clustering_TconvOnly_hyperParamGrid.xlsx"))
 
-# TODO automate
-# process Tconv cells for each different nCluster of interest
-set.seed(6022)
-seuratTconv <- FindNeighbors(seuratTconv, dims = 1:12)
-seuratTconv <- FindClusters(seuratTconv, resolution = 0.35)
-
-set.seed(6022)
-seuratTconv <- RunUMAP(object = seuratTconv, reduction = "pca",
-  reduction.key = "umap_",
-  return.model = TRUE,
-  dims = 1:12,
-  n.neighbors = 5,
-  min.dist = 1)
-
-
-# store cluster info in seurat object metadata
-# Initialize clusterName and clusterMarkers
-clusterName <- character()
-clusterMarkers <- list()
-
-# Create the cluster name for RNA
-clusterName <- paste0("seurat_clusters_Tconv")
-
-# Add metadata to the Seurat object
-seuratTconv <- seuratTconv %>%
-  Seurat::AddMetaData(Idents(seuratTconv), col.name = clusterName)
-
-# Set the identifiers
-Idents(seuratTconv) <- seuratTconv@meta.data[[clusterName]]
-
-# Ensure data layers are joined
-seuratTconv <- JoinLayers(seuratTconv)
-
-# Get the number of distinct RNA clusters
-num_clusters <- n_distinct(seuratTconv@meta.data[[clusterName]])
-
-# Get the "ggsci::uniform_startrek" palette and adjust it
-# palRNAClustersTconv <- paletteer_d("basetheme::royal", n = num_clusters) %>% # paletteer_d("khroma::okabeitoblack", n = num_clusters) %>%
-#   sample() %>%  # Shuffle colors
-#   .[!grepl("yellow|black", .)] %>%  # Drop yellow and black colors
-#   setNames(sort(unique(seuratTconv@meta.data[[clusterName]])))
-
-palRNAClustersTconv <- paletteer_d("khroma::okabeitoblack", n = num_clusters) %>%
-  sample() %>%  # Shuffle colors
-  .[!grepl("yellow|black", .)] %>%  # Drop yellow and black colors
-  setNames(sort(unique(seuratTconv@meta.data[[clusterName]])))
 
 # palRNAClustersTconv <- c(
 #   "0" = "#67001FFF",
@@ -3047,6 +3030,838 @@ palRNAClustersTconv <- paletteer_d("khroma::okabeitoblack", n = num_clusters) %>
 #   "4" = "#F0E442FF",
 #   "5" = "#f68e06"
 # )
+```
+
+```{r createAgReactiveTCRSubset}
+# create a subset of cleanTCRs.df containing only the barcodes in seuratQCMergedCleaned
+# that correspond to cellType %in% c("Treg", "Tconv")
+barcodesTregTconv.tmp <- rownames(seuratQCMergedCleaned@meta.data)[seuratQCMergedCleaned@meta.data$cellType %in% c("Treg", "Tconv")]
+
+cleanTCRsAgSpecific.df <- cleanTCRs.df %>%
+  dplyr::filter(barcode %in% barcodesTregTconv.tmp)
+
+# let's re-determine the TCR pairs on this subset
+cleanTCRAgSpecificPairs.df <- combinePairs(cleanTCRsAgSpecific.df)
+
+# replace some metadata that we'd lost
+metaData.df.tmp <- seuratQCMergedCleaned@meta.data
+
+cleanTCRAgSpecificPairs.df <- cleanTCRAgSpecificPairs.df %>%
+  left_join(metaData.df.tmp %>% dplyr::select(barcode, stimulationFigures, donorIdFigures, studyGroup, cellType), by = "barcode")
+
+cleanTCRAgSpecificPairs.df$fullLengthNT <- paste0(cleanTCRAgSpecificPairs.df$fullLengthNTa, cleanTCRAgSpecificPairs.df$fullLengthNTb)
+
+rm_tmp(ask = FALSE)
+```
+
+```{r AgReactiveTCRPairsAccounting}
+# total number of pairs = 23155
+dim(cleanTCRAgSpecificPairs.df)
+
+# total number of cells with pairs = 20355
+length(unique(cleanTCRAgSpecificPairs.df$barcode))
+
+# breakdown of pairs by stimulation: 20672 Microbial, 967 IAR, 1516 Polyclonal
+table(cleanTCRAgSpecificPairs.df$stimulationFigures)
+
+# number of unique pairs (nucleotide level) = 18196
+length(unique(cleanTCRAgSpecificPairs.df$fullLengthNT))
+
+# Check TCR sharing across stimulation categories
+tcr_by_stimulation <- cleanTCRAgSpecificPairs.df %>%
+  group_by(fullLengthNT) %>%
+  summarise(
+    n_occurrences = n(),
+    has_Microbial = any(stimulationFigures == "Microbial"),
+    has_IAR = any(stimulationFigures == "IAR"),
+    has_Polyclonal = any(stimulationFigures == "Polyclonal"),
+    # Cell type counts for each TCR
+    n_Treg = sum(cellType == "Treg"),
+    n_Tconv = sum(cellType == "Tconv"),
+    # Donor counts for each TCR
+    n_donor_2_T1D = sum(donorIdFigures == "2_T1D"),
+    n_donor_5_T1D = sum(donorIdFigures == "5_T1D"),
+    n_donor_6_T1D = sum(donorIdFigures == "6_T1D"),
+    n_donor_1_Control = sum(donorIdFigures == "1_Control"),
+    n_donor_3_Control = sum(donorIdFigures == "3_Control"),
+    n_donor_4_Control = sum(donorIdFigures == "4_Control"),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # Create standardized combination labels
+    combination = case_when(
+      has_Microbial & has_IAR & has_Polyclonal ~ "Microbial + IAR + Polyclonal",
+      has_Microbial & has_IAR & !has_Polyclonal ~ "Microbial + IAR",
+      has_Microbial & !has_IAR & has_Polyclonal ~ "Microbial + Polyclonal",
+      !has_Microbial & has_IAR & has_Polyclonal ~ "IAR + Polyclonal",
+      has_Microbial & !has_IAR & !has_Polyclonal ~ "Microbial only",
+      !has_Microbial & has_IAR & !has_Polyclonal ~ "IAR only",
+      !has_Microbial & !has_IAR & has_Polyclonal ~ "Polyclonal only",
+      TRUE ~ "Error"
+    ),
+    n_stimulation_categories = as.numeric(has_Microbial) + as.numeric(has_IAR) + as.numeric(has_Polyclonal)
+  )
+
+# Summary of all combinations (7 total) with cell type and donor breakdown
+tcr_combination_summary <- tcr_by_stimulation %>%
+  group_by(combination) %>%
+  summarise(
+    n_unique_tcrs = n(),
+    total_tcr_occurrences = sum(n_occurrences),
+    # Cell type breakdown - unique TCRs
+    unique_tcrs_Treg = sum(n_Treg > 0),
+    unique_tcrs_Tconv = sum(n_Tconv > 0),
+    # Cell type breakdown - total occurrences
+    total_occurrences_Treg = sum(n_Treg),
+    total_occurrences_Tconv = sum(n_Tconv),
+    # Donor breakdown - unique TCRs
+    unique_tcrs_donor_2_T1D = sum(n_donor_2_T1D > 0),
+    unique_tcrs_donor_5_T1D = sum(n_donor_5_T1D > 0),
+    unique_tcrs_donor_6_T1D = sum(n_donor_6_T1D > 0),
+    unique_tcrs_donor_1_Control = sum(n_donor_1_Control > 0),
+    unique_tcrs_donor_3_Control = sum(n_donor_3_Control > 0),
+    unique_tcrs_donor_4_Control = sum(n_donor_4_Control > 0),
+    # Donor breakdown - total occurrences
+    total_occurrences_donor_2_T1D = sum(n_donor_2_T1D),
+    total_occurrences_donor_5_T1D = sum(n_donor_5_T1D),
+    total_occurrences_donor_6_T1D = sum(n_donor_6_T1D),
+    total_occurrences_donor_1_Control = sum(n_donor_1_Control),
+    total_occurrences_donor_3_Control = sum(n_donor_3_Control),
+    total_occurrences_donor_4_Control = sum(n_donor_4_Control),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n_unique_tcrs))
+
+cat("Complete breakdown of TCR sharing across all stimulation combinations:\n")
+print(tcr_combination_summary)
+
+# Save the summary table as an Excel file
+write.xlsx(tcr_combination_summary,
+  file.path(dataOutputDir, paste0(Sys.Date(), "_TCR_stimulation_combination_summary.xlsx")),
+  rowNames = FALSE)
+cat("\nSummary table saved to:", file.path(dataOutputDir, paste0(Sys.Date(), "_TCR_stimulation_combination_summary.xlsx")), "\n")
+
+# Verification that totals match
+cat("\nVerification:\n")
+cat("Sum of total_tcr_occurrences:", sum(tcr_combination_summary$total_tcr_occurrences), "\n")
+cat("Total rows in original data:", nrow(cleanTCRAgSpecificPairs.df), "\n")
+cat("Sum of n_unique_tcrs:", sum(tcr_combination_summary$n_unique_tcrs), "\n")
+cat("Total unique TCRs:", length(unique(cleanTCRAgSpecificPairs.df$fullLengthNT)), "\n")
+
+# Count how many unique TCRs appear in multiple stimulation categories
+cross_category_tcrs <- tcr_by_stimulation %>%
+  filter(n_stimulation_categories > 1)
+
+cat("\nNumber of unique TCR pairs that appear in multiple stimulation categories:", nrow(cross_category_tcrs), "\n")
+
+# Verification: breakdown of unique TCRs by stimulation category
+unique_tcr_breakdown <- cleanTCRAgSpecificPairs.df %>%
+  group_by(stimulationFigures) %>%
+  summarise(
+    total_pairs = n(),
+    unique_tcrs = n_distinct(fullLengthNT),
+    .groups = "drop"
+  )
+
+cat("\nBreakdown of unique TCRs by stimulation category:\n")
+print(unique_tcr_breakdown)
+
+# Analysis of TCR sharing between donors
+cat("\n", paste(rep("=", 60), collapse = ""), "\n")
+cat("ANALYSIS: TCR SHARING BETWEEN DONORS\n")
+cat(paste(rep("=", 60), collapse = ""), "\n")
+
+# Create donor sharing analysis
+tcr_donor_sharing <- tcr_by_stimulation %>%
+  rowwise() %>%
+  mutate(
+    # Count how many donors have each TCR
+    n_donors_with_tcr = sum(c(n_donor_2_T1D > 0, n_donor_5_T1D > 0, n_donor_6_T1D > 0,
+      n_donor_1_Control > 0, n_donor_3_Control > 0, n_donor_4_Control > 0)),
+    # Create donor combination string
+    donors_present = paste(c(
+      if (n_donor_2_T1D > 0) "2_T1D" else NULL,
+      if (n_donor_5_T1D > 0) "5_T1D" else NULL,
+      if (n_donor_6_T1D > 0) "6_T1D" else NULL,
+      if (n_donor_1_Control > 0) "1_Control" else NULL,
+      if (n_donor_3_Control > 0) "3_Control" else NULL,
+      if (n_donor_4_Control > 0) "4_Control" else NULL
+    ), collapse = ", ")
+  ) %>%
+  ungroup()
+
+# Overall sharing statistics
+cat("Overall TCR sharing statistics:\n")
+sharing_counts <- table(tcr_donor_sharing$n_donors_with_tcr)
+for (i in 1:6) {
+  if (i %in% names(sharing_counts)) {
+    cat(paste0("TCRs present in ", i, " donor(s): ", sharing_counts[as.character(i)], "\n"))
+  } else {
+    cat(paste0("TCRs present in ", i, " donor(s): 0\n"))
+  }
+}
+
+# Focus on shared TCRs (present in >1 donor)
+shared_tcrs <- tcr_donor_sharing %>%
+  filter(n_donors_with_tcr > 1)
+
+cat(paste0("\nNumber of unique TCR sequences shared between donors: ", nrow(shared_tcrs), "\n"))
+cat(paste0("Percentage of unique TCRs that are shared: ",
+  round(100 * nrow(shared_tcrs) / nrow(tcr_donor_sharing), 2), "%\n"))
+
+if (nrow(shared_tcrs) > 0) {
+  # Summary of sharing patterns
+  sharing_patterns <- shared_tcrs %>%
+    group_by(n_donors_with_tcr, donors_present) %>%
+    summarise(
+      n_tcrs = n(),
+      total_occurrences = sum(n_occurrences),
+      .groups = "drop"
+    ) %>%
+    arrange(desc(n_donors_with_tcr), desc(n_tcrs))
+
+  cat("\nDetailed sharing patterns:\n")
+  print(sharing_patterns)
+
+  # Summary by number of donors
+  sharing_summary <- shared_tcrs %>%
+    group_by(n_donors_with_tcr) %>%
+    summarise(
+      n_unique_tcrs = n(),
+      total_occurrences = sum(n_occurrences),
+      avg_occurrences_per_tcr = round(mean(n_occurrences), 2),
+      .groups = "drop"
+    )
+
+  cat("\nSummary by number of sharing donors:\n")
+  print(sharing_summary)
+
+  # Check for T1D vs Control sharing
+  t1d_control_sharing <- shared_tcrs %>%
+    rowwise() %>%
+    mutate(
+      has_t1d = any(c(n_donor_2_T1D > 0, n_donor_5_T1D > 0, n_donor_6_T1D > 0)),
+      has_control = any(c(n_donor_1_Control > 0, n_donor_3_Control > 0, n_donor_4_Control > 0)),
+      sharing_type = case_when(
+        has_t1d & has_control ~ "T1D-Control",
+        has_t1d & !has_control ~ "T1D-only",
+        !has_t1d & has_control ~ "Control-only",
+        TRUE ~ "Error"
+      )
+    ) %>%
+    ungroup()
+
+  sharing_by_group <- t1d_control_sharing %>%
+    group_by(sharing_type) %>%
+    summarise(
+      n_shared_tcrs = n(),
+      total_occurrences = sum(n_occurrences),
+      .groups = "drop"
+    )
+
+  cat("\nSharing between T1D and Control groups:\n")
+  print(sharing_by_group)
+
+  # Detailed analysis of the shared TCR(s)
+  cat("\n", paste(rep("=", 50), collapse = ""), "\n")
+  cat("DETAILED ANALYSIS OF SHARED TCR(S)\n")
+  cat(paste(rep("=", 50), collapse = ""), "\n")
+
+  for (i in 1:nrow(shared_tcrs)) {
+    shared_tcr_seq <- shared_tcrs$fullLengthNT[i]
+    cat(paste0("\nShared TCR #", i, ":\n"))
+    cat(paste0("TCR sequence: ", shared_tcr_seq, "\n"))
+    cat(paste0("Present in donors: ", shared_tcrs$donors_present[i], "\n"))
+    cat(paste0("Total occurrences: ", shared_tcrs$n_occurrences[i], "\n"))
+
+    # Get all cell details for this TCR
+    tcr_details <- cleanTCRAgSpecificPairs.df %>%
+      filter(fullLengthNT == shared_tcr_seq) %>%
+      select(barcode, donorIdFigures, stimulationFigures, cellType) %>%
+      arrange(donorIdFigures, stimulationFigures, cellType)
+
+    cat("\nCell-level details:\n")
+    print(tcr_details)
+
+    # Summary by donor
+    donor_summary <- tcr_details %>%
+      group_by(donorIdFigures) %>%
+      summarise(
+        n_cells = n(),
+        stimulations = paste(unique(stimulationFigures), collapse = ", "),
+        cell_types = paste(unique(cellType), collapse = ", "),
+        .groups = "drop"
+      )
+
+    cat("\nSummary by donor:\n")
+    print(donor_summary)
+
+    # Summary by stimulation
+    stim_summary <- tcr_details %>%
+      group_by(stimulationFigures) %>%
+      summarise(
+        n_cells = n(),
+        donors = paste(unique(donorIdFigures), collapse = ", "),
+        cell_types = paste(unique(cellType), collapse = ", "),
+        .groups = "drop"
+      )
+
+    cat("\nSummary by stimulation:\n")
+    print(stim_summary)
+
+    # Summary by cell type
+    celltype_summary <- tcr_details %>%
+      group_by(cellType) %>%
+      summarise(
+        n_cells = n(),
+        donors = paste(unique(donorIdFigures), collapse = ", "),
+        stimulations = paste(unique(stimulationFigures), collapse = ", "),
+        .groups = "drop"
+      )
+
+    cat("\nSummary by cell type:\n")
+    print(celltype_summary)
+    cat("\n", paste(rep("-", 50), collapse = ""), "\n")
+  }
+
+} else {
+  cat("No TCR sequences are shared between donors.\n")
+}
+
+# Create dataframe of TCR pairs that exist in multiple stimulations
+cat("\n", paste(rep("=", 60), collapse = ""), "\n")
+cat("CREATING INTER-STIMULATION TCR PAIRS DATAFRAME\n")
+cat(paste(rep("=", 60), collapse = ""), "\n")
+
+# Get TCRs that appear in multiple stimulations from our previous analysis
+inter_stim_tcrs <- tcr_by_stimulation %>%
+  filter(n_stimulation_categories > 1) %>%
+  pull(fullLengthNT)
+
+cat("Number of unique TCR sequences present in multiple stimulations:", length(inter_stim_tcrs), "\n")
+
+# Create the new dataframe containing only these TCR pairs
+cleanTCRAgSpecificInterStimPairs.df <- cleanTCRAgSpecificPairs.df %>%
+  filter(fullLengthNT %in% inter_stim_tcrs)
+
+cat("Total TCR pairs in inter-stimulation dataframe:", nrow(cleanTCRAgSpecificInterStimPairs.df), "\n")
+cat("Percentage of original pairs:", round(100 * nrow(cleanTCRAgSpecificInterStimPairs.df) / nrow(cleanTCRAgSpecificPairs.df), 2), "%\n")
+
+# Show breakdown by stimulation
+inter_stim_breakdown <- cleanTCRAgSpecificInterStimPairs.df %>%
+  group_by(stimulationFigures) %>%
+  summarise(
+    n_pairs = n(),
+    n_unique_tcrs = n_distinct(fullLengthNT),
+    .groups = "drop"
+  )
+
+cat("\nBreakdown of inter-stimulation pairs by stimulation:\n")
+print(inter_stim_breakdown)
+
+# Show breakdown by cell type
+inter_stim_celltype <- cleanTCRAgSpecificInterStimPairs.df %>%
+  group_by(cellType) %>%
+  summarise(
+    n_pairs = n(),
+    n_unique_tcrs = n_distinct(fullLengthNT),
+    .groups = "drop"
+  )
+
+cat("\nBreakdown of inter-stimulation pairs by cell type:\n")
+print(inter_stim_celltype)
+
+# Show some examples
+cat("\nFirst 10 inter-stimulation TCR pairs:\n")
+examples <- cleanTCRAgSpecificInterStimPairs.df %>%
+  select(barcode, donorIdFigures, stimulationFigures, cellType, fullLengthNT) %>%
+  head(10)
+print(examples)
+
+cat("\nInter-stimulation TCR pairs dataframe created successfully!\n")
+
+# Analysis of IAR TCR sharing with other stimulations
+cat("\n", paste(rep("=", 60), collapse = ""), "\n")
+cat("IAR TCR SHARING ANALYSIS\n")
+cat(paste(rep("=", 60), collapse = ""), "\n")
+
+# Get all unique TCRs that appear in IAR stimulation
+iar_tcrs <- cleanTCRAgSpecificPairs.df %>%
+  filter(stimulationFigures == "IAR") %>%
+  pull(fullLengthNT) %>%
+  unique()
+
+cat("Total unique TCR sequences in IAR stimulation:", length(iar_tcrs), "\n")
+
+# For each IAR TCR, check which other stimulations it appears in
+iar_sharing_analysis <- cleanTCRAgSpecificPairs.df %>%
+  filter(fullLengthNT %in% iar_tcrs) %>%
+  group_by(fullLengthNT) %>%
+  summarise(
+    total_occurrences = n(),
+    has_IAR = any(stimulationFigures == "IAR"),
+    has_Microbial = any(stimulationFigures == "Microbial"),
+    has_Polyclonal = any(stimulationFigures == "Polyclonal"),
+    stimulations_present = paste(unique(stimulationFigures), collapse = ", "),
+    n_stimulations = n_distinct(stimulationFigures),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    sharing_pattern = case_when(
+      has_IAR & has_Microbial & has_Polyclonal ~ "IAR + Microbial + Polyclonal",
+      has_IAR & has_Microbial & !has_Polyclonal ~ "IAR + Microbial",
+      has_IAR & !has_Microbial & has_Polyclonal ~ "IAR + Polyclonal",
+      has_IAR & !has_Microbial & !has_Polyclonal ~ "IAR only",
+      TRUE ~ "Error"
+    )
+  )
+
+# Summary of IAR TCR sharing patterns
+iar_sharing_summary <- iar_sharing_analysis %>%
+  group_by(sharing_pattern) %>%
+  summarise(
+    n_unique_tcrs = n(),
+    total_occurrences = sum(total_occurrences),
+    avg_occurrences_per_tcr = round(mean(total_occurrences), 2),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n_unique_tcrs))
+
+cat("\nIAR TCR sharing patterns:\n")
+print(iar_sharing_summary)
+
+# Calculate percentages
+iar_sharing_summary <- iar_sharing_summary %>%
+  mutate(
+    percentage_of_iar_tcrs = round(100 * n_unique_tcrs / sum(n_unique_tcrs), 2),
+    percentage_of_iar_occurrences = round(100 * total_occurrences / sum(total_occurrences), 2)
+  )
+
+cat("\nIAR TCR sharing patterns with percentages:\n")
+print(iar_sharing_summary)
+
+# Specific numbers for shared vs unique
+iar_only <- sum(iar_sharing_analysis$sharing_pattern == "IAR only")
+iar_shared <- sum(iar_sharing_analysis$sharing_pattern != "IAR only")
+
+cat("\nSummary:\n")
+cat("IAR TCRs that are IAR-only:", iar_only, "(", round(100 * iar_only / length(iar_tcrs), 2), "%)\n")
+cat("IAR TCRs that are shared with other stimulations:", iar_shared, "(", round(100 * iar_shared / length(iar_tcrs), 2), "%)\n")
+
+# Show details of shared IAR TCRs
+if (iar_shared > 0) {
+  cat("\nDetails of shared IAR TCRs:\n")
+  shared_iar_details <- iar_sharing_analysis %>%
+    filter(sharing_pattern != "IAR only") %>%
+    arrange(desc(total_occurrences))
+
+  print(shared_iar_details)
+
+  # Cell-level breakdown for shared IAR TCRs
+  cat("\nCell-level breakdown for shared IAR TCRs:\n")
+  shared_iar_cells <- cleanTCRAgSpecificPairs.df %>%
+    filter(fullLengthNT %in% shared_iar_details$fullLengthNT) %>%
+    group_by(fullLengthNT, stimulationFigures) %>%
+    summarise(
+      n_cells = n(),
+      cell_types = paste(unique(cellType), collapse = ", "),
+      donors = paste(unique(donorIdFigures), collapse = ", "),
+      .groups = "drop"
+    ) %>%
+    arrange(fullLengthNT, stimulationFigures)
+
+  print(shared_iar_cells)
+
+  # Analysis of unique cells for shared IAR TCRs
+  cat("\n", paste(rep("-", 50), collapse = ""), "\n")
+  cat("UNIQUE CELL ANALYSIS FOR SHARED IAR TCRS\n")
+  cat(paste(rep("-", 50), collapse = ""), "\n")
+
+  # Get all cells (barcodes) that have shared IAR TCRs
+  shared_iar_cell_analysis <- cleanTCRAgSpecificPairs.df %>%
+    filter(fullLengthNT %in% shared_iar_details$fullLengthNT)
+
+  cat("Total TCR pairs for shared IAR TCRs:", nrow(shared_iar_cell_analysis), "\n")
+  cat("Unique cells for shared IAR TCRs:", length(unique(shared_iar_cell_analysis$barcode)), "\n")
+
+  # Break down by stimulation
+  shared_iar_cell_breakdown <- shared_iar_cell_analysis %>%
+    group_by(stimulationFigures) %>%
+    summarise(
+      n_tcr_pairs = n(),
+      n_unique_cells = n_distinct(barcode),
+      n_unique_tcrs = n_distinct(fullLengthNT),
+      avg_pairs_per_cell = round(n_tcr_pairs / n_unique_cells, 2),
+      .groups = "drop"
+    )
+
+  cat("\nBreakdown by stimulation for shared IAR TCRs:\n")
+  print(shared_iar_cell_breakdown)
+
+  # Overall summary comparing TCR pairs vs unique cells
+  cat("\nSummary for shared IAR TCRs:\n")
+  cat("- Unique TCR sequences:", nrow(shared_iar_details), "\n")
+  cat("- Total TCR pairs:", nrow(shared_iar_cell_analysis), "\n")
+  cat("- Unique cells (barcodes):", length(unique(shared_iar_cell_analysis$barcode)), "\n")
+  cat("- Average TCR pairs per cell:", round(nrow(shared_iar_cell_analysis) / length(unique(shared_iar_cell_analysis$barcode)), 2), "\n")
+
+  # Compare cells in IAR vs other stimulations for shared TCRs
+  cat("\nCells carrying shared IAR TCRs by stimulation:\n")
+  shared_iar_cells_by_stim <- shared_iar_cell_analysis %>%
+    group_by(stimulationFigures) %>%
+    summarise(
+      unique_cells = n_distinct(barcode),
+      percentage = round(100 * n_distinct(barcode) / length(unique(shared_iar_cell_analysis$barcode)), 2),
+      .groups = "drop"
+    )
+  print(shared_iar_cells_by_stim)
+
+  # Check for cells that appear in multiple stimulations with shared IAR TCRs
+  cell_multi_stim <- shared_iar_cell_analysis %>%
+    group_by(barcode) %>%
+    summarise(
+      n_stimulations = n_distinct(stimulationFigures),
+      stimulations = paste(unique(stimulationFigures), collapse = ", "),
+      n_tcr_pairs = n(),
+      .groups = "drop"
+    ) %>%
+    filter(n_stimulations > 1)
+
+  if (nrow(cell_multi_stim) > 0) {
+    cat("\nCells that appear in multiple stimulations with shared IAR TCRs:\n")
+    print(cell_multi_stim)
+  } else {
+    cat("\nNo individual cells appear in multiple stimulations with shared IAR TCRs.\n")
+  }
+}
+
+# Analysis of Microbial TCR sharing with other stimulations
+cat("\n", paste(rep("=", 60), collapse = ""), "\n")
+cat("MICROBIAL TCR SHARING ANALYSIS\n")
+cat(paste(rep("=", 60), collapse = ""), "\n")
+
+# Get all unique TCRs that appear in Microbial stimulation
+microbial_tcrs <- cleanTCRAgSpecificPairs.df %>%
+  filter(stimulationFigures == "Microbial") %>%
+  pull(fullLengthNT) %>%
+  unique()
+
+cat("Total unique TCR sequences in Microbial stimulation:", length(microbial_tcrs), "\n")
+
+# For each Microbial TCR, check which other stimulations it appears in
+microbial_sharing_analysis <- cleanTCRAgSpecificPairs.df %>%
+  filter(fullLengthNT %in% microbial_tcrs) %>%
+  group_by(fullLengthNT) %>%
+  summarise(
+    total_occurrences = n(),
+    has_Microbial = any(stimulationFigures == "Microbial"),
+    has_IAR = any(stimulationFigures == "IAR"),
+    has_Polyclonal = any(stimulationFigures == "Polyclonal"),
+    stimulations_present = paste(unique(stimulationFigures), collapse = ", "),
+    n_stimulations = n_distinct(stimulationFigures),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    sharing_pattern = case_when(
+      has_Microbial & has_IAR & has_Polyclonal ~ "Microbial + IAR + Polyclonal",
+      has_Microbial & has_IAR & !has_Polyclonal ~ "Microbial + IAR",
+      has_Microbial & !has_IAR & has_Polyclonal ~ "Microbial + Polyclonal",
+      has_Microbial & !has_IAR & !has_Polyclonal ~ "Microbial only",
+      TRUE ~ "Error"
+    )
+  )
+
+# Summary of Microbial TCR sharing patterns
+microbial_sharing_summary <- microbial_sharing_analysis %>%
+  group_by(sharing_pattern) %>%
+  summarise(
+    n_unique_tcrs = n(),
+    total_occurrences = sum(total_occurrences),
+    avg_occurrences_per_tcr = round(mean(total_occurrences), 2),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n_unique_tcrs))
+
+cat("\nMicrobial TCR sharing patterns:\n")
+print(microbial_sharing_summary)
+
+# Calculate percentages
+microbial_sharing_summary <- microbial_sharing_summary %>%
+  mutate(
+    percentage_of_microbial_tcrs = round(100 * n_unique_tcrs / sum(n_unique_tcrs), 2),
+    percentage_of_microbial_occurrences = round(100 * total_occurrences / sum(total_occurrences), 2)
+  )
+
+cat("\nMicrobial TCR sharing patterns with percentages:\n")
+print(microbial_sharing_summary)
+
+# Specific numbers for shared vs unique
+microbial_only <- sum(microbial_sharing_analysis$sharing_pattern == "Microbial only")
+microbial_shared <- sum(microbial_sharing_analysis$sharing_pattern != "Microbial only")
+
+cat("\nSummary:\n")
+cat("Microbial TCRs that are Microbial-only:", microbial_only, "(", round(100 * microbial_only / length(microbial_tcrs), 2), "%)\n")
+cat("Microbial TCRs that are shared with other stimulations:", microbial_shared, "(", round(100 * microbial_shared / length(microbial_tcrs), 2), "%)\n")
+
+# Show details of shared Microbial TCRs and cell analysis
+if (microbial_shared > 0) {
+  cat("\nDetails of shared Microbial TCRs:\n")
+  shared_microbial_details <- microbial_sharing_analysis %>%
+    filter(sharing_pattern != "Microbial only") %>%
+    arrange(desc(total_occurrences))
+
+  print(shared_microbial_details)
+
+  # Analysis of unique cells for shared Microbial TCRs
+  cat("\n", paste(rep("-", 50), collapse = ""), "\n")
+  cat("UNIQUE CELL ANALYSIS FOR SHARED MICROBIAL TCRS\n")
+  cat(paste(rep("-", 50), collapse = ""), "\n")
+
+  # Get all cells (barcodes) that have shared Microbial TCRs
+  shared_microbial_cell_analysis <- cleanTCRAgSpecificPairs.df %>%
+    filter(fullLengthNT %in% shared_microbial_details$fullLengthNT)
+
+  cat("Total TCR pairs for shared Microbial TCRs:", nrow(shared_microbial_cell_analysis), "\n")
+  cat("Unique cells for shared Microbial TCRs:", length(unique(shared_microbial_cell_analysis$barcode)), "\n")
+
+  # Break down by stimulation
+  shared_microbial_cell_breakdown <- shared_microbial_cell_analysis %>%
+    group_by(stimulationFigures) %>%
+    summarise(
+      n_tcr_pairs = n(),
+      n_unique_cells = n_distinct(barcode),
+      n_unique_tcrs = n_distinct(fullLengthNT),
+      avg_pairs_per_cell = round(n_tcr_pairs / n_unique_cells, 2),
+      .groups = "drop"
+    )
+
+  cat("\nBreakdown by stimulation for shared Microbial TCRs:\n")
+  print(shared_microbial_cell_breakdown)
+
+  # Overall summary comparing TCR pairs vs unique cells
+  cat("\nSummary for shared Microbial TCRs:\n")
+  cat("- Unique TCR sequences:", nrow(shared_microbial_details), "\n")
+  cat("- Total TCR pairs:", nrow(shared_microbial_cell_analysis), "\n")
+  cat("- Unique cells (barcodes):", length(unique(shared_microbial_cell_analysis$barcode)), "\n")
+  cat("- Average TCR pairs per cell:", round(nrow(shared_microbial_cell_analysis) / length(unique(shared_microbial_cell_analysis$barcode)), 2), "\n")
+
+  # Compare cells in Microbial vs other stimulations for shared TCRs
+  cat("\nCells carrying shared Microbial TCRs by stimulation:\n")
+  shared_microbial_cells_by_stim <- shared_microbial_cell_analysis %>%
+    group_by(stimulationFigures) %>%
+    summarise(
+      unique_cells = n_distinct(barcode),
+      percentage = round(100 * n_distinct(barcode) / length(unique(shared_microbial_cell_analysis$barcode)), 2),
+      .groups = "drop"
+    )
+  print(shared_microbial_cells_by_stim)
+
+  # Check for cells that appear in multiple stimulations with shared Microbial TCRs
+  cell_multi_stim_microbial <- shared_microbial_cell_analysis %>%
+    group_by(barcode) %>%
+    summarise(
+      n_stimulations = n_distinct(stimulationFigures),
+      stimulations = paste(unique(stimulationFigures), collapse = ", "),
+      n_tcr_pairs = n(),
+      .groups = "drop"
+    ) %>%
+    filter(n_stimulations > 1)
+
+  if (nrow(cell_multi_stim_microbial) > 0) {
+    cat("\nCells that appear in multiple stimulations with shared Microbial TCRs:\n")
+    print(cell_multi_stim_microbial)
+  } else {
+    cat("\nNo individual cells appear in multiple stimulations with shared Microbial TCRs.\n")
+  }
+}
+
+# Analysis of individual TCR chains across stimulation combinations
+cat("\n", paste(rep("=", 60), collapse = ""), "\n")
+cat("TCR CHAIN ANALYSIS ACROSS STIMULATION COMBINATIONS\n")
+cat(paste(rep("=", 60), collapse = ""), "\n")
+
+# Analyze individual TCR chains (alpha and beta separately)
+tcr_chains_by_stimulation <- cleanTCRsAgSpecific.df %>%
+  group_by(fullLengthNT, chain) %>%
+  summarise(
+    n_occurrences = n(),
+    has_Microbial = any(stimulationFigures == "Microbial"),
+    has_IAR = any(stimulationFigures == "IAR"),
+    has_Polyclonal = any(stimulationFigures == "Polyclonal"),
+    # Cell type counts for each TCR chain
+    n_Treg = sum(cellType == "Treg", na.rm = TRUE),
+    n_Tconv = sum(cellType == "Tconv", na.rm = TRUE),
+    # Donor counts for each TCR chain
+    n_donor_2_T1D = sum(donorIdFigures == "2_T1D", na.rm = TRUE),
+    n_donor_5_T1D = sum(donorIdFigures == "5_T1D", na.rm = TRUE),
+    n_donor_6_T1D = sum(donorIdFigures == "6_T1D", na.rm = TRUE),
+    n_donor_1_Control = sum(donorIdFigures == "1_Control", na.rm = TRUE),
+    n_donor_3_Control = sum(donorIdFigures == "3_Control", na.rm = TRUE),
+    n_donor_4_Control = sum(donorIdFigures == "4_Control", na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # Create standardized combination labels
+    combination = case_when(
+      has_Microbial & has_IAR & has_Polyclonal ~ "Microbial + IAR + Polyclonal",
+      has_Microbial & has_IAR & !has_Polyclonal ~ "Microbial + IAR",
+      has_Microbial & !has_IAR & has_Polyclonal ~ "Microbial + Polyclonal",
+      !has_Microbial & has_IAR & has_Polyclonal ~ "IAR + Polyclonal",
+      has_Microbial & !has_IAR & !has_Polyclonal ~ "Microbial only",
+      !has_Microbial & has_IAR & !has_Polyclonal ~ "IAR only",
+      !has_Microbial & !has_IAR & has_Polyclonal ~ "Polyclonal only",
+      TRUE ~ "Error"
+    ),
+    n_stimulation_categories = as.numeric(has_Microbial) + as.numeric(has_IAR) + as.numeric(has_Polyclonal)
+  )
+
+# Summary of TCR chains by combination and chain type
+tcr_chains_combination_summary <- tcr_chains_by_stimulation %>%
+  group_by(combination, chain) %>%
+  summarise(
+    n_unique_tcr_chains = n(),
+    total_chain_occurrences = sum(n_occurrences),
+    # Cell type breakdown - unique chains
+    unique_chains_Treg = sum(n_Treg > 0),
+    unique_chains_Tconv = sum(n_Tconv > 0),
+    # Cell type breakdown - total occurrences
+    total_occurrences_Treg = sum(n_Treg),
+    total_occurrences_Tconv = sum(n_Tconv),
+    # Donor breakdown - unique chains
+    unique_chains_donor_2_T1D = sum(n_donor_2_T1D > 0),
+    unique_chains_donor_5_T1D = sum(n_donor_5_T1D > 0),
+    unique_chains_donor_6_T1D = sum(n_donor_6_T1D > 0),
+    unique_chains_donor_1_Control = sum(n_donor_1_Control > 0),
+    unique_chains_donor_3_Control = sum(n_donor_3_Control > 0),
+    unique_chains_donor_4_Control = sum(n_donor_4_Control > 0),
+    # Donor breakdown - total occurrences
+    total_occurrences_donor_2_T1D = sum(n_donor_2_T1D),
+    total_occurrences_donor_5_T1D = sum(n_donor_5_T1D),
+    total_occurrences_donor_6_T1D = sum(n_donor_6_T1D),
+    total_occurrences_donor_1_Control = sum(n_donor_1_Control),
+    total_occurrences_donor_3_Control = sum(n_donor_3_Control),
+    total_occurrences_donor_4_Control = sum(n_donor_4_Control),
+    .groups = "drop"
+  ) %>%
+  arrange(chain, desc(n_unique_tcr_chains))
+
+cat("Complete breakdown of TCR chains across stimulation combinations:\n")
+print(tcr_chains_combination_summary)
+
+# Separate summaries for alpha and beta chains
+cat("\n=== ALPHA CHAINS ===\n")
+alpha_summary <- tcr_chains_combination_summary %>%
+  filter(chain == "TRA") %>%
+  select(-chain)
+print(alpha_summary)
+
+cat("\n=== BETA CHAINS ===\n")
+beta_summary <- tcr_chains_combination_summary %>%
+  filter(chain == "TRB") %>%
+  select(-chain)
+print(beta_summary)
+
+# Overall chain statistics
+cat("\n=== OVERALL CHAIN STATISTICS ===\n")
+overall_chain_stats <- cleanTCRsAgSpecific.df %>%
+  group_by(chain) %>%
+  summarise(
+    total_chains = n(),
+    unique_chains = n_distinct(fullLengthNT),
+    .groups = "drop"
+  )
+print(overall_chain_stats)
+
+# Cross-stimulation chain analysis
+cross_stim_chains <- tcr_chains_by_stimulation %>%
+  filter(n_stimulation_categories > 1) %>%
+  group_by(chain) %>%
+  summarise(
+    n_cross_stim_chains = n(),
+    total_cross_stim_occurrences = sum(n_occurrences),
+    .groups = "drop"
+  )
+
+cat("\nCross-stimulation chain sharing:\n")
+print(cross_stim_chains)
+
+# Calculate percentages for cross-stimulation sharing
+chain_sharing_percentages <- tcr_chains_by_stimulation %>%
+  group_by(chain) %>%
+  summarise(
+    total_unique_chains = n(),
+    cross_stim_chains = sum(n_stimulation_categories > 1),
+    percentage_cross_stim = round(100 * sum(n_stimulation_categories > 1) / n(), 2),
+    .groups = "drop"
+  )
+
+cat("\nPercentage of chains shared across stimulations:\n")
+print(chain_sharing_percentages)
+
+# Save the chain analysis results
+write.xlsx(list(
+  "Chain_Summary_All" = tcr_chains_combination_summary,
+  "Alpha_Chains" = alpha_summary,
+  "Beta_Chains" = beta_summary,
+  "Overall_Stats" = overall_chain_stats,
+  "Cross_Stim_Summary" = cross_stim_chains,
+  "Sharing_Percentages" = chain_sharing_percentages
+), file.path(dataOutputDir, paste0(Sys.Date(), "_TCR_chains_stimulation_combination_summary.xlsx")))
+
+cat("\nChain analysis saved to:", file.path(dataOutputDir, paste0(Sys.Date(), "_TCR_chains_stimulation_combination_summary.xlsx")), "\n")
+
+# Verification
+cat("\n=== VERIFICATION ===\n")
+cat("Total alpha chains in analysis:", sum(tcr_chains_combination_summary$total_chain_occurrences[tcr_chains_combination_summary$chain == "TRA"]), "\n")
+cat("Total beta chains in analysis:", sum(tcr_chains_combination_summary$total_chain_occurrences[tcr_chains_combination_summary$chain == "TRB"]), "\n")
+cat("Total alpha chains in original data:", sum(cleanTCRsAgSpecific.df$chain == "TRA"), "\n")
+cat("Total beta chains in original data:", sum(cleanTCRsAgSpecific.df$chain == "TRB"), "\n")
+
+# Combined summary showing both chains and pairs
+cat("\n", paste(rep("=", 60), collapse = ""), "\n")
+cat("COMBINED SUMMARY: CHAINS vs PAIRS\n")
+cat(paste(rep("=", 60), collapse = ""), "\n")
+
+# First, ensure all summaries have the same combinations by using a full join approach
+all_combinations <- tcr_combination_summary$combination
+
+# Create complete alpha and beta summaries with all combinations
+alpha_summary_complete <- tcr_combination_summary %>%
+  select(combination) %>%
+  left_join(alpha_summary, by = "combination") %>%
+  mutate(
+    n_unique_tcr_chains = ifelse(is.na(n_unique_tcr_chains), 0, n_unique_tcr_chains),
+    total_chain_occurrences = ifelse(is.na(total_chain_occurrences), 0, total_chain_occurrences)
+  )
+
+beta_summary_complete <- tcr_combination_summary %>%
+  select(combination) %>%
+  left_join(beta_summary, by = "combination") %>%
+  mutate(
+    n_unique_tcr_chains = ifelse(is.na(n_unique_tcr_chains), 0, n_unique_tcr_chains),
+    total_chain_occurrences = ifelse(is.na(total_chain_occurrences), 0, total_chain_occurrences)
+  )
+
+# Create a comparison table with consistent row counts
+comparison_summary <- data.frame(
+  combination = tcr_combination_summary$combination,
+  unique_pairs = tcr_combination_summary$n_unique_tcrs,
+  total_pair_occurrences = tcr_combination_summary$total_tcr_occurrences,
+  unique_alpha_chains = alpha_summary_complete$n_unique_tcr_chains,
+  unique_beta_chains = beta_summary_complete$n_unique_tcr_chains,
+  total_alpha_occurrences = alpha_summary_complete$total_chain_occurrences,
+  total_beta_occurrences = beta_summary_complete$total_chain_occurrences
+)
+
+cat("Comparison of chains vs pairs by stimulation combination:\n")
+print(comparison_summary)
+
+# Save the comparison
+write.xlsx(comparison_summary,
+  file.path(dataOutputDir, paste0(Sys.Date(), "_TCR_chains_vs_pairs_comparison.xlsx")),
+  rowNames = FALSE)
+
+cat("\nComparison table saved to:", file.path(dataOutputDir, paste0(Sys.Date(), "_TCR_chains_vs_pairs_comparison.xlsx")), "\n")
 ```
 
 ```{r examineClusterLevelsTconv}
@@ -3535,11 +4350,11 @@ for (i in 1:nrow(optHyperParamGrid.df)) {
 cat("Processing complete!\n")
 ```
 
-```{r savePreprocDataTEMPORARY}
+<!-- ```{r savePreprocDataTEMPORARY}
 # NOTE THIS IS TEMPORARY UNTIL WE FIGURE OUT THE TREG/TCONV OPT CLUSTERING AGAIN
 # save the workspace as an .RData file
 save.image(file.path(dataOutputDir, "20250610_preprocData_TregTconvClusteringTroubleShooting.RData"))
-```
+``` -->
 
 ```{r analyzeOldVsNewTregClustering}
 # Function to compare cluster gene files and calculate similarity metrics
@@ -4133,7 +4948,7 @@ dev.off()
 ```
 
 ```{r referenceMappingInferNonDSCellsInTregAndTconvClusters}
-# First Tregs
+# ==================================================Tregs=============================================================
 # note: these should only be used for cellType = Treg. The Tconv cells are probably somewhat erroneously projected.
 # Ensure both datasets are normalized and have the same set of features
 seuratQCMergedCleaned <- NormalizeData(seuratQCMergedCleaned,
@@ -4211,7 +5026,7 @@ print(umap.trial.tmp)
 dev.off()
 
 
-# =================================now Tconvs=====================================
+# =================================Tconvs=====================================
 # note: these should only be used for cellType = Tconv. The Treg cells are probably somewhat erroneously projected.
 seuratTconv <- NormalizeData(seuratTconv,
   verbose = FALSE,
@@ -4287,21 +5102,7 @@ print(umap.trial.tmp)
 dev.off()
 ```
 
-```{r createAgReactiveTCRSubset}
-# create a subset of cleanTCRs.df containing only the barcodes in seuratQCMergedCleaned
-# that correspond to cellType %in% c("Treg", "Tconv")
-barcodesTregTconv.tmp <- rownames(seuratQCMergedCleaned@meta.data)[seuratQCMergedCleaned@meta.data$cellType %in% c("Treg", "Tconv")]
-
-cleanTCRsAgSpecific.df <- cleanTCRs.df %>%
-  dplyr::filter(barcode %in% barcodesTregTconv.tmp)
-
-# let's re-determine the TCR pairs on this subset
-cleanTCRAgSpecificpairs.df <- combinePairs(cleanTCRsAgSpecific.df)
-
-rm_tmp(ask = FALSE)
-```
-
 ```{r savePreprocData}
 # save the workspace as an .RData file
-save.image(file.path(dataOutputDir, "20250522_preprocData.RData"))
+save.image(file.path(dataOutputDir, "20250715_preprocData.RData"))
 ```

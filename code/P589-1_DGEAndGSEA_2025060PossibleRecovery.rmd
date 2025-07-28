@@ -134,7 +134,7 @@ savePlot <- function(
 
   # Save as PDF
   if ("pdf" %in% formats) {
-    pdf(file.path(plotDir, paste0(filename, ".pdf")), height = height, width = width)
+    pdf(file.path(plotDir, paste0(filenameSuffix, "_", filename, ".pdf")), height = height, width = width)
     print(plot)
     dev.off()
   }
@@ -142,7 +142,7 @@ savePlot <- function(
   # Save as PNG
   if ("png" %in% formats) {
     png(
-      file.path(plotDir, paste0(filename, ".png")),
+      file.path(plotDir, paste0(filenameSuffix, "_", filename, ".png")),
       height = height,
       width = width,
       units = units,
@@ -260,29 +260,124 @@ results_Treg_IARVMicrobial$gene <- rownames(results_Treg_IARVMicrobial)
 results_Tconv_IARVMicrobial <- topTable(fit2, coef = "Tconv_IARVMicrobial", adjust.method = "BH", sort.by = "P", number = Inf)
 results_Tconv_IARVMicrobial$gene <- rownames(results_Tconv_IARVMicrobial)
 
+# Add Ensembl gene IDs to all results tables
+library(biomaRt)
+library(geneSynonym)
+
+# Connect to Ensembl human database (using recent stable version)
+ensembl <- useMart("ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensembl")
+
+# Function to add Ensembl IDs to results table
+add_ensembl_ids <- function(results_df) {
+  # Get mapping from HGNC symbols to Ensembl IDs
+  gene_mapping <- getBM(
+    attributes = c("hgnc_symbol", "ensembl_gene_id"),
+    filters = "hgnc_symbol",
+    values = results_df$gene,
+    mart = ensembl
+  )
+
+  # Remove duplicates - keep only first Ensembl ID per gene symbol
+  gene_mapping <- gene_mapping %>%
+    dplyr::filter(!is.na(ensembl_gene_id) & ensembl_gene_id != "") %>%
+    dplyr::group_by(hgnc_symbol) %>%
+    dplyr::slice(1) %>%
+    dplyr::ungroup()
+
+  # Add ensembl_gene_id column to results_df, initialized as NA
+  results_with_ensembl <- results_df
+  results_with_ensembl$ensembl_gene_id <- NA_character_
+
+  # Update with mapped IDs
+  for (i in 1:nrow(gene_mapping)) {
+    gene_name <- gene_mapping$hgnc_symbol[i]
+    ensembl_id <- gene_mapping$ensembl_gene_id[i]
+    results_with_ensembl$ensembl_gene_id[results_with_ensembl$gene == gene_name] <- ensembl_id
+  }
+
+  # Find genes with NA Ensembl IDs
+  na_genes <- results_with_ensembl$gene[is.na(results_with_ensembl$ensembl_gene_id)]
+
+  if (length(na_genes) > 0) {
+    cat("Attempting to resolve", length(na_genes), "genes with NA Ensembl IDs using gene synonyms...\n")
+
+    # Try to resolve NAs using gene synonyms
+    for (gene in na_genes) {
+      tryCatch(
+        {
+          # Get synonyms for this gene
+          synonyms_list <- humanSyno(gene)
+
+          if (length(synonyms_list) > 0 && length(synonyms_list[[1]]) > 0) {
+            synonyms <- synonyms_list[[1]][[1]]  # Extract the vector of synonyms
+
+            # Try each synonym until we get a match
+            for (synonym in synonyms) {
+              if (synonym != gene) {  # Skip the original gene name
+                synonym_mapping <- getBM(
+                  attributes = c("hgnc_symbol", "ensembl_gene_id"),
+                  filters = "hgnc_symbol",
+                  values = synonym,
+                  mart = ensembl
+                )
+
+                if (nrow(synonym_mapping) > 0 && !is.na(synonym_mapping$ensembl_gene_id[1]) && synonym_mapping$ensembl_gene_id[1] != "") {
+                  # Update the NA value with the found Ensembl ID
+                  results_with_ensembl$ensembl_gene_id[results_with_ensembl$gene == gene] <- synonym_mapping$ensembl_gene_id[1]
+                  cat("Resolved", gene, "->", synonym, "->", synonym_mapping$ensembl_gene_id[1], "\n")
+                  break  # Stop trying synonyms for this gene
+                }
+              }
+            }
+          }
+        },
+        error = function(e) {
+          # Silently continue if there's an error with this gene
+        })
+    }
+  }
+
+  # Reorder columns to put ensembl_gene_id after gene
+  col_order <- c("gene", "ensembl_gene_id",
+    setdiff(names(results_with_ensembl), c("gene", "ensembl_gene_id")))
+  results_with_ensembl <- results_with_ensembl[, col_order]
+
+  return(results_with_ensembl)
+}
+
+# Add Ensembl IDs to all results tables
+cat("Adding Ensembl gene IDs to DGE results...\n")
+results_Microbial_TregVTconv <- add_ensembl_ids(results_Microbial_TregVTconv)
+results_IAR_TregVTconv <- add_ensembl_ids(results_IAR_TregVTconv)
+results_Polyclonal_TregVTconv <- add_ensembl_ids(results_Polyclonal_TregVTconv)
+results_Combined_TregVTconv <- add_ensembl_ids(results_Combined_TregVTconv)
+results_Treg_IARVMicrobial <- add_ensembl_ids(results_Treg_IARVMicrobial)
+results_Tconv_IARVMicrobial <- add_ensembl_ids(results_Tconv_IARVMicrobial)
+cat("Ensembl gene IDs added successfully.\n")
+
 # write all results to .csv files
 write.csv(results_Microbial_TregVTconv,
-  file = file.path(dataOutputDir, "DGE_Microbial_TregVTconv.csv"),
+  file = file.path(dataOutputDir, paste0(filenameSuffix, "DGE_Microbial_TregVTconv.csv")),
   row.names = TRUE)
 
 write.csv(results_IAR_TregVTconv,
-  file = file.path(dataOutputDir, "DGE_IAR_TregVTconv.csv"),
+  file = file.path(dataOutputDir, paste0(filenameSuffix, "DGE_IAR_TregVTconv.csv")),
   row.names = TRUE)
 
 write.csv(results_Polyclonal_TregVTconv,
-  file = file.path(dataOutputDir, "DGE_Polyclonal_TregVTconv.csv"),
+  file = file.path(dataOutputDir, paste0(filenameSuffix, "DGE_Polyclonal_TregVTconv.csv")),
   row.names = TRUE)
 
 write.csv(results_Combined_TregVTconv,
-  file = file.path(dataOutputDir, "DGE_Combined_TregVTconv.csv"),
+  file = file.path(dataOutputDir, paste0(filenameSuffix, "DGE_Combined_TregVTconv.csv")),
   row.names = TRUE)
 
 write.csv(results_Treg_IARVMicrobial,
-  file = file.path(dataOutputDir, "DGE_Treg_IARVMicrobial.csv"),
+  file = file.path(dataOutputDir, paste0(filenameSuffix, "DGE_Treg_IARVMicrobial.csv")),
   row.names = TRUE)
 
 write.csv(results_Tconv_IARVMicrobial,
-  file = file.path(dataOutputDir, "DGE_Tconv_IARVMicrobial.csv"),
+  file = file.path(dataOutputDir, paste0(filenameSuffix, "DGE_Tconv_IARVMicrobial.csv")),
   row.names = TRUE)
 
 # rm_tmp(ask = FALSE)
@@ -1297,13 +1392,23 @@ create_combined_treg_gsea <- function(comparisons) {
     TERM2GENE = hs_sets,
     minGSSize = 10,
     maxGSSize = 1000,
-    pvalueCutoff = 0.05)  # Get ALL pathways with proper FDR correction
+    pvalueCutoff = 1)  # Get ALL pathways with proper FDR correction
 
   treg_go_gsea <- GSEA(treg_geneList,
     TERM2GENE = GO_sets,
     minGSSize = 10,
     maxGSSize = 1000,
-    pvalueCutoff = 0.05)  # Get ALL pathways with proper FDR correction
+    pvalueCutoff = 1)  # Get ALL pathways with proper FDR correction
+
+  # Export GSEA results to Excel
+  gsea_data_list <- list(
+    "Treg_Hallmark" = treg_hallmark_gsea@result,
+    "Treg_GO" = treg_go_gsea@result
+  )
+
+  output_filename <- file.path(dataOutputDir, paste0(filenameSuffix, "GSEA_results_Treg_IARVMicrobial.xlsx"))
+  write.xlsx(gsea_data_list, file = output_filename, overwrite = TRUE)
+  cat("GSEA results exported to:", output_filename, "\n")
 
   # Select significant terms
   hallmark_significant <- treg_hallmark_gsea@result %>%
@@ -1460,7 +1565,17 @@ create_combined_tconv_gsea <- function(comparisons) {
     TERM2GENE = GO_sets,
     minGSSize = 10,
     maxGSSize = 1000,
-    pvalueCutoff = 0.05)  # Get ALL pathways with proper FDR correction
+    pvalueCutoff = 1)  # Get ALL pathways with proper FDR correction
+
+  # Export GSEA results to Excel
+  gsea_data_list <- list(
+    "Tconv_Hallmark" = tconv_hallmark_gsea@result,
+    "Tconv_GO" = tconv_go_gsea@result
+  )
+
+  output_filename <- file.path(dataOutputDir, paste0(filenameSuffix, "GSEA_results_Tconv_IARVMicrobial.xlsx"))
+  write.xlsx(gsea_data_list, file = output_filename, overwrite = TRUE)
+  cat("GSEA results exported to:", output_filename, "\n")
 
   # Select significant terms
   hallmark_significant <- tconv_hallmark_gsea@result %>%
@@ -1877,102 +1992,6 @@ savePlot(
 )
 ```
 
-```{r outputGSEAResults}
-
-# Export GSEA results to Excel files
-# Create a function to extract and format GSEA results
-extract_gsea_results <- function(gsea_obj, term_type) {
-  if (nrow(gsea_obj@result) == 0) {
-    return(data.frame())
-  }
-
-  results_df <- gsea_obj@result %>%
-    dplyr::filter(p.adjust < 0.05) %>%
-    dplyr::select(ID, setSize, NES, p.adjust) %>%
-    dplyr::rename(term_name = ID) %>%
-    dplyr::arrange(p.adjust)
-
-  return(results_df)
-}
-
-# Set up comparisons for both cell types
-comparisons_export <- list()
-comparisons_export[["results_Treg_IARVMicrobial"]] <- results_Treg_IARVMicrobial
-comparisons_export[["results_Tconv_IARVMicrobial"]] <- results_Tconv_IARVMicrobial
-
-# Gene sets
-hs_sets <- msigdbr(species = "Homo sapiens", category = "H") %>%
-  dplyr::select(gs_name, gene_symbol)
-
-GO_sets <- msigdbr(species = "Homo sapiens", category = "C5") %>%
-  dplyr::select(gs_name, gene_symbol)
-
-# Process each comparison
-for (comp in names(comparisons_export)) {
-  cat("Processing GSEA results for:", comp, "\n")
-
-  # Get gene list
-  df <- comparisons_export[[comp]]
-  df_sig <- df %>% filter(adj.P.Val <= 0.1)
-
-  if (nrow(df_sig) < 10) {
-    cat("Not enough significant genes for", comp, ", skipping.\n")
-    next
-  }
-
-  geneList <- df_sig$logFC
-  names(geneList) <- df_sig$gene
-  geneList <- sort(geneList, decreasing = TRUE)
-
-  # Run Hallmark GSEA
-  hallmark_gsea <- GSEA(geneList,
-    TERM2GENE = hs_sets,
-    minGSSize = 10,
-    maxGSSize = 1000,
-    pvalueCutoff = 1.0)
-
-  # Run GO GSEA
-  go_gsea <- GSEA(geneList,
-    TERM2GENE = GO_sets,
-    minGSSize = 10,
-    maxGSSize = 1000,
-    pvalueCutoff = 1.0)
-
-  # Extract results
-  hallmark_results <- extract_gsea_results(hallmark_gsea, "Hallmark")
-  go_results <- extract_gsea_results(go_gsea, "GO")
-
-  # Clean up term names
-  if (nrow(hallmark_results) > 0) {
-    hallmark_results$term_name <- gsub("HALLMARK_", "", hallmark_results$term_name)
-  }
-
-  if (nrow(go_results) > 0) {
-    go_results$term_name <- gsub("GOCC_|GOBP_|GOMF_", "", go_results$term_name)
-  }
-
-  # Create cell type name for file naming
-  cell_type <- ifelse(grepl("Treg", comp), "Treg", "Tconv")
-
-  # Export to Excel files
-  if (nrow(hallmark_results) > 0) {
-    hallmark_filename <- file.path(dataOutputDir, paste0("GSEA_Hallmark_", cell_type, "_IARvMicrobial_significant.xlsx"))
-    openxlsx::write.xlsx(hallmark_results, hallmark_filename, rowNames = FALSE)
-    cat("Exported", nrow(hallmark_results), "significant Hallmark terms for", cell_type, "to", hallmark_filename, "\n")
-  } else {
-    cat("No significant Hallmark terms for", cell_type, "\n")
-  }
-
-  if (nrow(go_results) > 0) {
-    go_filename <- file.path(dataOutputDir, paste0("GSEA_GO_", cell_type, "_IARvMicrobial_significant.xlsx"))
-    openxlsx::write.xlsx(go_results, go_filename, rowNames = FALSE)
-    cat("Exported", nrow(go_results), "significant GO terms for", cell_type, "to", go_filename, "\n")
-  } else {
-    cat("No significant GO terms for", cell_type, "\n")
-  }
-}
-```
-
 ## Stacked Treg Plot - curated terms
 
 ```{r Figure2EStackedTregHallmarkGOCuratedTerms}
@@ -2042,7 +2061,7 @@ create_curated_stacked_treg_gsea <- function(comparisons) {
       term_key = gsub("HALLMARK_", "", ID),
       Description_clean = curated_hallmark_terms[term_key]
     ) %>%
-    dplyr::select(ID, Description_clean, NES, p.adjust, GeneSet)
+    dplyr::select(ID, Description_clean, NES, p.adjust, GeneSet, setSize)
 
   go_curated <- treg_go_gsea@result %>%
     dplyr::filter(ID %in% paste0("GOBP_", names(curated_go_terms)) |
@@ -2053,7 +2072,7 @@ create_curated_stacked_treg_gsea <- function(comparisons) {
       term_key = gsub("GOBP_|GOCC_|GOMF_", "", ID),
       Description_clean = curated_go_terms[term_key]
     ) %>%
-    dplyr::select(ID, Description_clean, NES, p.adjust, GeneSet)
+    dplyr::select(ID, Description_clean, NES, p.adjust, GeneSet, setSize)
 
   # Combine curated data
   combined_data <- rbind(hallmark_curated, go_curated)
@@ -2080,13 +2099,47 @@ create_curated_stacked_treg_gsea <- function(comparisons) {
   combined_data$Description_clean <- factor(combined_data$Description_clean,
     levels = c(hallmark_order, go_order))
 
+  # Calculate custom size scale breaks with more robust logic
+  size_range <- range(combined_data$setSize)
+  # Ensure we get 4 distinct values by creating a wider range
+  range_width <- size_range[2] - size_range[1]
+  if (range_width < 15) {
+    # If range is too narrow, expand it significantly
+    size_min <- floor((size_range[1] - 15) / 5) * 5
+    size_max <- ceiling((size_range[2] + 15) / 5) * 5
+  } else {
+    # Normal expansion
+    size_min <- floor((size_range[1] - 5) / 5) * 5
+    size_max <- ceiling((size_range[2] + 5) / 5) * 5
+  }
+
+  # Create exactly 4 breaks
+  size_breaks <- seq(size_min, size_max, length.out = 4)
+  size_breaks <- round(size_breaks / 5) * 5  # Round to multiples of 5
+  size_breaks <- unique(size_breaks)  # Remove duplicates
+
+  # If we still don't have 4, force create them
+  if (length(size_breaks) < 4) {
+    size_breaks <- seq(size_min, size_max, length.out = 4)
+    size_breaks <- round(size_breaks / 5) * 5
+    # Manually adjust to ensure 4 unique values
+    while (length(unique(size_breaks)) < 4) {
+      size_max <- size_max + 5
+      size_breaks <- seq(size_min, size_max, length.out = 4)
+      size_breaks <- round(size_breaks / 5) * 5
+    }
+    size_breaks <- unique(size_breaks)
+  }
+
   # Create the plot with proportional panel heights
+  # For true area scaling, we need to take square root of size values
+  # since ggplot2's size aesthetic scales by radius, not area
   p <- ggplot(combined_data, aes(x = NES, y = Description_clean)) +
     geom_vline(xintercept = 0, linetype = "solid", color = "gray80") +
     geom_segment(aes(y = Description_clean, yend = Description_clean, x = 0, xend = NES),
       color = "black", linewidth = 0.5) +
     geom_point(aes(
-      size = -log10(p.adjust),
+      size = setSize,
       fill = -log10(p.adjust)
     ),
     shape = 21,
@@ -2097,10 +2150,16 @@ create_curated_stacked_treg_gsea <- function(comparisons) {
       low = "lightblue", high = "red",
       name = "-log10(Adj.P)"
     ) +
+    scale_size_area(
+      breaks = size_breaks,
+      limits = c(min(size_breaks), max(size_breaks)),
+      max_size = 8,
+      guide = guide_legend(override.aes = list(fill = NA, color = "black"))
+    ) +
     labs(
       x = "Normalized Enrichment Score (NES)",
       y = "",
-      size = "-log10(Adj.P)",
+      size = "Gene Set Size",
       title = "Treg: Curated Hallmark and GO Gene Sets (IAR vs Microbial)"
     ) +
     theme_bw() +
@@ -2210,7 +2269,7 @@ create_curated_stacked_tconv_gsea <- function(comparisons) {
       term_key = gsub("HALLMARK_", "", ID),
       Description_clean = curated_hallmark_terms[term_key]
     ) %>%
-    dplyr::select(ID, Description_clean, NES, p.adjust, GeneSet)
+    dplyr::select(ID, Description_clean, NES, p.adjust, GeneSet, setSize)
 
   go_curated <- tconv_go_gsea@result %>%
     dplyr::filter(ID %in% paste0("GOBP_", names(curated_go_terms)) |
@@ -2221,7 +2280,7 @@ create_curated_stacked_tconv_gsea <- function(comparisons) {
       term_key = gsub("GOBP_|GOCC_|GOMF_", "", ID),
       Description_clean = curated_go_terms[term_key]
     ) %>%
-    dplyr::select(ID, Description_clean, NES, p.adjust, GeneSet)
+    dplyr::select(ID, Description_clean, NES, p.adjust, GeneSet, setSize)
 
   # Combine curated data
   combined_data <- rbind(hallmark_curated, go_curated)
@@ -2248,13 +2307,47 @@ create_curated_stacked_tconv_gsea <- function(comparisons) {
   combined_data$Description_clean <- factor(combined_data$Description_clean,
     levels = c(hallmark_order, go_order))
 
+  # Calculate custom size scale breaks with more robust logic
+  size_range <- range(combined_data$setSize)
+  # Ensure we get 4 distinct values by creating a wider range
+  range_width <- size_range[2] - size_range[1]
+  if (range_width < 15) {
+    # If range is too narrow, expand it significantly
+    size_min <- floor((size_range[1] - 15) / 5) * 5
+    size_max <- ceiling((size_range[2] + 15) / 5) * 5
+  } else {
+    # Normal expansion
+    size_min <- floor((size_range[1] - 5) / 5) * 5
+    size_max <- ceiling((size_range[2] + 5) / 5) * 5
+  }
+
+  # Create exactly 4 breaks
+  size_breaks <- seq(size_min, size_max, length.out = 4)
+  size_breaks <- round(size_breaks / 5) * 5  # Round to multiples of 5
+  size_breaks <- unique(size_breaks)  # Remove duplicates
+
+  # If we still don't have 4, force create them
+  if (length(size_breaks) < 4) {
+    size_breaks <- seq(size_min, size_max, length.out = 4)
+    size_breaks <- round(size_breaks / 5) * 5
+    # Manually adjust to ensure 4 unique values
+    while (length(unique(size_breaks)) < 4) {
+      size_max <- size_max + 5
+      size_breaks <- seq(size_min, size_max, length.out = 4)
+      size_breaks <- round(size_breaks / 5) * 5
+    }
+    size_breaks <- unique(size_breaks)
+  }
+
   # Create the plot with proportional panel heights
+  # For true area scaling, we need to take square root of size values
+  # since ggplot2's size aesthetic scales by radius, not area
   p <- ggplot(combined_data, aes(x = NES, y = Description_clean)) +
     geom_vline(xintercept = 0, linetype = "solid", color = "gray80") +
     geom_segment(aes(y = Description_clean, yend = Description_clean, x = 0, xend = NES),
       color = "black", linewidth = 0.5) +
     geom_point(aes(
-      size = -log10(p.adjust),
+      size = setSize,
       fill = -log10(p.adjust)
     ),
     shape = 21,
@@ -2265,10 +2358,16 @@ create_curated_stacked_tconv_gsea <- function(comparisons) {
       low = "lightblue", high = "red",
       name = "-log10(Adj.P)"
     ) +
+    scale_size_area(
+      breaks = size_breaks,
+      limits = c(min(size_breaks), max(size_breaks)),
+      max_size = 8,
+      guide = guide_legend(override.aes = list(fill = NA, color = "black"))
+    ) +
     labs(
       x = "Normalized Enrichment Score (NES)",
       y = "",
-      size = "-log10(Adj.P)",
+      size = "Gene Set Size",
       title = "Tconv: Curated Hallmark and GO Gene Sets (IAR vs Microbial)"
     ) +
     theme_bw() +

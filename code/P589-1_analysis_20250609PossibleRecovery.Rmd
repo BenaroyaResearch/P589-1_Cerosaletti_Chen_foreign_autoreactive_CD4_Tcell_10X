@@ -6226,17 +6226,27 @@ plotGenesOfInterest <- function(seuratObject, geneList, fileName, reductionName 
 ```{r defineGeneOfInterestPlotFunctionStimulationFacet}
 # Define the function to plot genes of interest with facet wrap by stimulationFigures
 # Define the function to plot a single gene of interest with facet wrap by stimulationFigures
-plotGenesOfInterestStimFacet <- function(seuratObject, gene, fileName, nCols = 2) {
+plotGenesOfInterestStimFacet <- function(seuratObject, gene, fileName, reductionName = "umap", nCols = 2) {
   pdf(
     file = file.path(plotDir, paste0(fileName, filenameSuffix, ".pdf")),
-    width = 6, height = 5
+    width = 9, height = 5.5
   )
 
-  # Extract the data for the gene of interest
-  data <- FetchData(seuratObject, vars = c("umap_1", "umap_2", "stimulationFigures", gene))
+  # Get UMAP coordinates directly from reduction
+  umap_coords <- Embeddings(seuratObject, reduction = reductionName)
+  
+  # Get other data
+  other_data <- FetchData(seuratObject, vars = c("stimulationFigures", gene))
+  
+  # Combine data
+  data <- data.frame(
+    umap_1 = umap_coords[, 1],
+    umap_2 = umap_coords[, 2],
+    other_data
+  )
 
   # Create a custom ggplot
-  genesOfInterestPlot <- ggplot(data, aes(x = .data$umap_1, y = .data$umap_2, color = .data[[gene]])) +
+  genesOfInterestPlot <- ggplot(data, aes(x = umap_1, y = umap_2, color = .data[[gene]])) +
     geom_point(size = 0.5) +
     scale_color_viridis_c() +
     labs(x = "UMAP 1", y = "UMAP 2") +
@@ -6321,6 +6331,35 @@ p <- ggplot(plot_data, aes(x = UMAP_1, y = UMAP_2, color = GLP1R_expression)) +
 print(p)
 dev.off()
 ```
+
+```{r plotTH2aGenesOnUMAPTomoakiTakao}
+genesOfInterest.tmp <- c("CD3D", "CD3E", "CD3G", "CD4", "HPGDS", "PTGDR2", "KLRB1", "IL1RL1", "ITGA4", "CD27", "LARP1")
+
+# genes on UMAP
+for (gene in genesOfInterest.tmp) {
+  plotGenesOfInterest(
+    seuratQCMergedCleaned,
+    gene,
+    reductionName = "ref.umap_DS",
+    paste0("seuratUMAP_", gene),
+    nCols = 1
+  )
+}
+
+# genes on UMAP, facet by stimulation
+for (gene in genesOfInterest.tmp) {
+  plotGenesOfInterestStimFacet(
+    seuratQCMergedCleaned,
+    gene,
+    reductionName = "ref.umap_DS",
+    paste0("seuratUMAP_stimulationFacet_", gene),
+    nCols = 3
+  )
+}
+
+rm_tmp(ask = FALSE)
+```
+
 ```{r genesOfInterestOnUMAP_TregModuleExpression}
 # Calculate the mean expression of the genes in genesOfInterestTreg
 seuratQCMergedCleanedDS$meanExpressionTreg <- rowMeans(
@@ -11726,12 +11765,16 @@ p.adjust(pvals, method = "BH")
 
 # across-3 Chi-Squared test
 
+# make a temporary cleanTCRpairs.df so that we don't screw up our data
+
+cleanTCRpairs.df.tmp <- cleanTCRpairs.df
+
 # 1. Create a clone ID in your TCR dataframe
-cleanTCRpairs.df <- cleanTCRpairs.df %>%
+cleanTCRpairs.df.tmp <- cleanTCRpairs.df.tmp %>%
   mutate(cloneID = paste(fullLengthNTa, fullLengthNTb, sep = "_"))
 
 # 2. Count how many cells per cloneID
-clone_counts <- cleanTCRpairs.df %>%
+clone_counts <- cleanTCRpairs.df.tmp %>%
   group_by(cloneID) %>%
   summarise(n_cells = n(), .groups = "drop")
 
@@ -11741,11 +11784,11 @@ expanded_clones <- clone_counts %>%
   pull(cloneID)
 
 # 4. Annotate each cell as expanded or not
-cleanTCRpairs.df <- cleanTCRpairs.df %>%
+cleanTCRpairs.df.tmp <- cleanTCRpairs.df.tmp %>%
   mutate(expanded = cloneID %in% expanded_clones)
 
 # Merge expanded status into Seurat metadata
-expanded_status <- cleanTCRpairs.df %>%
+expanded_status <- cleanTCRpairs.df.tmp %>%
   dplyr::select(barcode, expanded)
 
 # Subset cells
@@ -11823,25 +11866,6 @@ chisq_test
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # End of across-3 Chi-Squared test
 
 # Tregs
@@ -11900,7 +11924,14 @@ p.adjust(pvals, method = "bonferroni")
 # Benjamini-Hochberg correction
 p.adjust(pvals, method = "BH")
 
-
+comparisons <- c("Microbial vs Polyclonal", "IAR vs Polyclonal", "Microbial vs IAR")
+results_df <- data.frame(
+  Comparison = comparisons,
+  P_value = pvals,
+  P_adj_bonferroni = p.adjust(pvals, method = "bonferroni"),
+  P_adj_BH = p.adjust(pvals, method = "BH")
+)
+print(results_df)
 
 
 
@@ -11960,7 +11991,14 @@ p.adjust(pvals, method = "bonferroni")
 # Benjamini-Hochberg correction
 p.adjust(pvals, method = "BH")
 
-
+comparisons <- c("Microbial vs Polyclonal", "IAR vs Polyclonal", "Microbial vs IAR")
+results_df <- data.frame(
+  Comparison = comparisons,
+  P_value = pvals,
+  P_adj_bonferroni = p.adjust(pvals, method = "bonferroni"),
+  P_adj_BH = p.adjust(pvals, method = "BH")
+)
+print(results_df)
 
 
 

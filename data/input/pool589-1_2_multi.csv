@@ -1,0 +1,12 @@
+[libraries],,,
+fastq_id,fastqs,lanes,feature_types
+lib101208_GEX,/nfs/bioinformatics/pipeline/Illumina/240604_VH01513_10_222337NNX/Unaligned/P589-1/lib101208_GEX,any,Gene Expression
+lib101209_TCR,/nfs/bioinformatics/pipeline/Illumina/240604_VH01513_10_222337NNX/Unaligned/P589-1/lib101209_TCR,any,vdj-t
+lib101210_FB,/nfs/bioinformatics/pipeline/Illumina/240604_VH01513_10_222337NNX/Unaligned/P589-1/lib101210_FB,any,Antibody Capture
+[gene-expression],,,
+reference,/nfs/bioinformatics/pipeline/annotation/pipeline/10x/refdata-gex-GRCh38-2020-A,,
+create-bam,true,,
+[vdj],,,
+reference,/nfs/bioinformatics/pipeline/annotation/pipeline/10x/refdata-cellranger-vdj-GRCh38-alts-ensembl-5.0.0,,
+[feature],,,
+reference,/nfs/bioinformatics/pipeline/Illumina/240604_VH01513_10_222337NNX/pool589-1_2_featureReference.csv,,

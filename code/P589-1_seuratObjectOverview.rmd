@@ -1,0 +1,167 @@
+---
+title: "10x of foreign Ag specific Tconv and Treg in T1D"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+setwd("/Users/tedwards/Documents/projects/P589-1_Cerosaletti_Chen_foreign_autoreactive_CD4_Tcell_10X")
+
+library(knitr)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(GGally)
+theme_set(
+  theme_bw(20) +
+    theme(panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(colour = "black", fill = NA, size = 1),
+      axis.text = element_text(colour = "black"),
+      axis.ticks = element_line(colour = "black"),
+      legend.key = element_blank(),
+      strip.text.x = element_text(size = 14, margin = margin(b = 2, t = 2)),
+      strip.background = element_rect(fill = "white", colour = "black")))
+
+library(ggthemes)
+library(ggforce)
+library(ggbeeswarm)
+library(ggvenn)
+library(viridis)
+library(stringr)
+library(readxl)
+library(openxlsx)
+library(kableExtra)
+library(RColorBrewer)
+library(plotly)
+library(tidyr)
+library(gtools)
+library(data.table)
+library(miscHelpers)
+library(tcrGraph)
+library(edgeR)
+library(limma)
+library(ggrepel)
+library(ComplexHeatmap)
+library(egg) # For ggarrange
+library(ggpubr) # Also for ggarrange
+library(umap)
+library(igraph)
+library(forcats)
+library(Seurat)
+library(apird)
+library(randomcoloR)
+library(rcartocolor)
+library(paletteer)
+library(circlize)
+library(gridExtra)
+library(ggpointdensity)
+library(cowplot)
+library(clusterSim) # for cluster-evaluation metrics
+library(foreach) # for parallel for-loops
+library(TCRtools) # for making circos plots with Matt D's code
+library(scDEED)
+library(dsb)
+library(monocle3)
+library(rstatix)
+library(SeuratData)
+library(SeuratWrappers)
+library(magrittr)
+library(purrr)
+library(msigdbr)
+library(clusterProfiler)
+library(enrichplot)
+library(patchwork)
+library(alphahull) # for boundary curves around clusters
+library(MASS) # for contour plots with density (provides kernal)
+library(ggh4x)
+library(readr)
+opts_chunk$set(fig.width = 6, fig.height = 4.0, cache = TRUE, echo = FALSE, warning = FALSE, message = FALSE, cache.lazy = FALSE, results = "hide")
+opts_knit$set(root.dir = "/Users/tedwards/Documents/projects/P589-1_Cerosaletti_Chen_foreign_autoreactive_CD4_Tcell_10X")
+
+options(stringsAsFactors = FALSE)
+
+options(future.globals.maxSize = 1591289600)
+```
+
+```{r seuratObjectOverview}
+# The Seurat object in this dataset that other researchers will find most useful is seuratAgSpecific, which is a subset of seuratQCMergedCleaned.
+# seuratAgSpecific only contains antigen-specific cells (Treg and Tconv), seuratAgSpecific <- subset(seuratQCMergedCleaned, cellType %in% c("Treg", "Tconv")),
+# while seuratQCMergedCleaned contains cells that fell outside of our TotalSeq gating scheme (cellType == "Other").
+# This object contains the 'final data' after all preprocessing, QC, analysis, and so on.
+# The object contains multiple cell types, stimulation pools, and UMAPs.
+
+# ==========================================stimulation============================================
+# the stimulation metadata is contained in both $stimulation and $stimulationFigures, the latter being friendlier for strings in figuress
+table(seuratAgSpecific@meta.data$stimulation)
+
+# CD3CD28    CEFX   Islet
+#    1550   22360     979
+
+table(seuratAgSpecific@meta.data$stimulationFigures)
+
+#  Microbial        IAR Polyclonal
+#      22360        979       1550
+
+# ==========================================donor ID============================================
+# donorId is stored in both $donorId and $donorIdFigures
+table(seuratAgSpecific@meta.data$donorId)
+
+# CerosalettiLab1059994 CerosalettiLab1464776  CerosalettiLab448473  CerosalettiLab632811  CerosalettiLab839987  CerosalettiLab942655
+#                  1194                  1776                  2958                  1705                  7287                  9969
+
+table(seuratAgSpecific@meta.data$donorIdFigures)
+
+# 1_Control 3_Control 4_Control     2_T1D     5_T1D     6_T1D
+#      1194      2958      1705      1776      7287      9969
+
+# ==========================================cell type============================================
+# $cellType contains Treg and Tconv, which were determined through a combination of RNAseq cluster identity and TotalSeq gating
+table(seuratAgSpecific@meta.data$cellType, useNA = "always")
+
+# Tconv  Treg  <NA>
+# 19820  5069     0
+
+# ============================================RNA clusters and UMAPs============================================
+# There are multiple different RNA clusterings and associated UMAPs in seuratAgSpecific
+# Starting with the various reductions
+names(seuratAgSpecific@reductions)
+# [1] "pca"            "umap"           "ref.pca"        "ref.umap"       "ref.umap_DS"    "ref.umap_Treg"  "ref.umap_Tconv"
+
+# "pca" is the correct pca reduction. "ref.pca" is leftover from reference mapping.
+
+# "umap" is from a UMAP calculated across all cells without downsampling the microbial/CEFX cells, and should not be used.
+
+# "ref.umap" is also a leftover from reference mapping and should not be used.
+
+# "ref.umap_DS" is the correct UMAP for all antigen-specific cells (Treg and Tconv together). It was created by clustering and projecting
+# the dataset after downsampling of microbial and before removing the cells that fell out of our TotalSeq gates ("other" or "Not Ag-specific" cells),
+# and then reference mapping the microbial cells back onto the downsampled UMAP.
+# The associated RNA clusters are in:
+table(seuratAgSpecific@meta.data$seurat_clusters_DS, useNA = "always")
+
+#     0     1     2     3     4     5     6  <NA>
+#  3005 15245  1255  4549   520    66   249     0
+
+# "ref.umap_Treg" is the UMAP for the Treg cells clustered alone. It was similarly created from a microbial-downsampled Treg-only seurat object (seuratTreg--don't use),
+# and then the missing cells were projection-mapped back onto it. This reduction should *only* be used after subsetting like: seuratTreg.tmp <- subset(seuratAgSpecific, cellType == "Treg").
+# The associated RNA clusters are in:
+table(seuratAgSpecific@meta.data$seurat_clusters_Treg, useNA = "always")
+
+#     0     1     2  <NA>
+# 12721  5793  6375     0
+
+# "ref.umap_Tconv" is the same thing as "ref.umap_Treg"...but for Tconvs.
+# This reduction should *only* be used after subsetting like: seuratTconv.tmp <- subset(seuratAgSpecific, cellType == "Tconv").
+# The RNA clusters are in
+table(seuratAgSpecific@meta.data$seurat_clusters_Tconv, useNA = "always")
+
+#     0     1     2     3     4  <NA>
+# 19873  2468  1386   908   254     0
+```

@@ -155,11 +155,8 @@ savePlot <- function(
 ```
 
 ```{r pseudobulkDGEStimulationCellType_harmonizeWithAHu}
-# Subset down our main Seurat object
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType %in% c("Treg", "Tconv"))
-
 # Fetch the raw counts from the Seurat object
-counts.tmp <- GetAssayData(seurat.tmp, assay = "RNA", layer = "counts")
+counts.tmp <- GetAssayData(seuratAgSpecific, assay = "RNA", layer = "counts")
 
 # Filter genes: keep only those expressed (count > 0) in at least 30% of cells
 cellCount <- ncol(counts.tmp)
@@ -167,7 +164,7 @@ geneFilter <- rowSums(counts.tmp > 0) >= 0.3 * cellCount
 counts.tmp <- counts.tmp[geneFilter, ]
 
 # Fetch metadata required for grouping
-metadata.tmp <- seurat.tmp@meta.data[, c("stimulationFigures", "donorIdFigures", "cellType")]
+metadata.tmp <- seuratAgSpecific@meta.data[, c("stimulationFigures", "donorIdFigures", "cellType")]
 
 # Create a new column for groupDGE with a consistent separator (e.g., "_")
 # Use donorIdFigures (not donorId)

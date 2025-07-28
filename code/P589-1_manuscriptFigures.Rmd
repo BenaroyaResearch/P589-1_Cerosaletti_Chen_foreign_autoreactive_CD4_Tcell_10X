@@ -454,11 +454,8 @@ rm_tmp(ask = FALSE)
 nClust <- length(table(seuratQCMergedCleaned@meta.data$seurat_clusters_DS))
 nClustString <- paste0("_", as.character(nClust), "Clusters")
 
-# filter to ag-specific cells only
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType %in% c("Treg", "Tconv"))
-
 # Extract metadata
-metadata.tmp <- seurat.tmp@meta.data
+metadata.tmp <- seuratAgSpecific@meta.data
 
 # create separate proportion plots and then combine them
 fontSize <- 8
@@ -530,7 +527,7 @@ rm_tmp(ask = FALSE)
 ```{r FigureS2B}
 # TotalSeq/CITESeq expression on Treg UMAP
 # TotalSeq/CITESeq markers on UMAPs
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType == "Treg")
+seurat.tmp <- subset(seuratAgSpecific, cellType == "Treg")
 
 # Set the default assay to 'FB'
 DefaultAssay(seurat.tmp) <- "FB"
@@ -567,7 +564,7 @@ rm_tmp(ask = FALSE)
 ```{r FigureS2D}
 # TotalSeq/CITESeq expression on Treg UMAP
 # TotalSeq/CITESeq markers on UMAPs
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType == "Tconv")
+seurat.tmp <- subset(seuratAgSpecific, cellType == "Tconv")
 
 # Set the default assay to 'FB'
 DefaultAssay(seurat.tmp) <- "FB"
@@ -644,8 +641,8 @@ create_faceted_umap <- function(seurat_obj,
     )
 }
 
-# Use the function
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType == "Treg")
+# subset to Treg cells
+seurat.tmp <- subset(seuratAgSpecific, cellType == "Treg")
 nClustString <- paste0("_", as.character(length(table(seurat.tmp@meta.data$seurat_clusters_Treg))), "Clusters")
 
 # Set seed for reproducibility
@@ -714,8 +711,8 @@ create_faceted_umap <- function(seurat_obj,
     )
 }
 
-# Use the function
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType == "Tconv")
+# subset to Tconv cells
+seurat.tmp <- subset(seuratAgSpecific, cellType == "Tconv")
 nClustString <- paste0("_", as.character(length(table(seurat.tmp@meta.data$seurat_clusters_Tconv))), "Clusters")
 
 # Set seed for reproducibility
@@ -849,7 +846,7 @@ write.csv(topMarkers, file.path(dataOutputDir, paste0("top", as.character(nGenes
 # now for figure-making code:
 
 # first subset down to Treg cells only
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType == "Treg")
+seurat.tmp <- subset(seuratAgSpecific, cellType == "Treg")
 
 nClust <- length(table(seurat.tmp@meta.data$seurat_clusters_Treg))
 nClustString <- paste0("_", as.character(nClust), "Clusters")
@@ -995,7 +992,7 @@ write.csv(topMarkers, file.path(dataOutputDir, paste0("top", as.character(nGenes
 # now for figure-making code:
 
 # first subset down to Tconv cells only
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType == "Tconv")
+seurat.tmp <- subset(seuratAgSpecific, cellType == "Tconv")
 
 nClust <- length(table(seurat.tmp@meta.data$seurat_clusters_Tconv))
 nClustString <- paste0("_", as.character(nClust), "Clusters")
@@ -1040,7 +1037,7 @@ rm_tmp(ask = FALSE)
 dotPlotDotSize <- 3.75
 
 # subset our seurat object down to just Treg cells
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType == "Treg")
+seurat.tmp <- subset(seuratAgSpecific, cellType == "Treg")
 
 # dotplots of lists of genes of interest for Treg cell clusters
 nClust <- length(table(seurat.tmp@meta.data$seurat_clusters_Treg))
@@ -1107,7 +1104,7 @@ for (genesOfInterestCategory in colnames(geneListsTreg.df)) {
 dotPlotDotSize <- 3.75
 
 # subset our seurat object down to just Tconv cells
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType == "Tconv")
+seurat.tmp <- subset(seuratAgSpecific, cellType == "Tconv")
 
 # dotplots of lists of genes of interest for Tconv cell clusters
 nClust <- length(table(seurat.tmp@meta.data$seurat_clusters_Tconv))
@@ -1475,8 +1472,8 @@ makeClusterExpansionUpsetPlots <- function(
   invisible(membership_df)
 }
 
-seurat.tmp <- subset(seuratQCMergedCleaned, stimulationFigures == "Microbial")
-seurat.tmp <- subset(seurat.tmp, cellType %in% c("Treg", "Tconv"))
+seurat.tmp <- subset(seuratAgSpecific, stimulationFigures == "Microbial")
+
 colors <- c(
   scales::alpha("red", 0.5), scales::alpha("red", 0.5), scales::alpha("red", 0.5),
   scales::alpha("blue", 0.5), scales::alpha("blue", 0.5),
@@ -1497,8 +1494,8 @@ makeClusterExpansionUpsetPlots(seuratObject = seurat.tmp,
   displayCounts = FALSE,
   filename = "microbial_TCR_Pair_Sharing_UpSet_Plot_noCounts")
 
-seurat.tmp <- subset(seuratQCMergedCleaned, stimulationFigures == "Polyclonal")
-seurat.tmp <- subset(seurat.tmp, cellType %in% c("Treg", "Tconv"))
+seurat.tmp <- subset(seuratAgSpecific, stimulationFigures == "Polyclonal")
+
 colors <- c(
   scales::alpha("red", 0.5), scales::alpha("red", 0.5),
   scales::alpha("blue", 0.5), scales::alpha("blue", 0.5),
@@ -1519,8 +1516,8 @@ makeClusterExpansionUpsetPlots(seuratObject = seurat.tmp,
   displayCounts = FALSE,
   filename = "polyclonal_TCR_Pair_Sharing_UpSet_Plot_noCounts")
 
-seurat.tmp <- subset(seuratQCMergedCleaned, stimulationFigures == "IAR")
-seurat.tmp <- subset(seurat.tmp, cellType %in% c("Treg", "Tconv"))
+seurat.tmp <- subset(seuratAgSpecific, stimulationFigures == "IAR")
+
 colors <- c(
   scales::alpha("red", 0.5), scales::alpha("red", 0.5),
   scales::alpha("blue", 0.5), scales::alpha("blue", 0.5),
@@ -1542,21 +1539,19 @@ makeClusterExpansionUpsetPlots(seuratObject = seurat.tmp,
   filename = "IAR_TCR_Pair_Sharing_UpSet_Plot_noCounts")
 
 # inter-stimulation version
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType %in% c("Treg", "Tconv"))
-
 colors <- c(
   scales::alpha("red", 0.5), scales::alpha("red", 0.5), scales::alpha("red", 0.5),
   scales::alpha("blue", 0.5), scales::alpha("blue", 0.5),
   scales::alpha("red", 0.5), scales::alpha("red", 0.5)
 )
-makeClusterExpansionUpsetPlots(seuratObject = seurat.tmp,
+makeClusterExpansionUpsetPlots(seuratObject = seuratAgSpecific,
   pairs = cleanTCRAgSpecificInterStimPairs.df,
   clusterColumn = "seurat_clusters_DS",
   title = "TCR sharing in RNAseq clusters\nbetween stimulations",
   colors = colors,
   filename = "InterStimulation_TCR_Pair_Sharing_UpSet_Plot")
 
-makeClusterExpansionUpsetPlots(seuratObject = seurat.tmp,
+makeClusterExpansionUpsetPlots(seuratObject = seuratAgSpecific,
   pairs = cleanTCRAgSpecificInterStimPairs.df,
   clusterColumn = "seurat_clusters_DS",
   title = "TCR sharing in RNAseq clusters\nbetween stimulations",
@@ -2293,7 +2288,7 @@ rm_tmp(ask = FALSE)
 ```{r Figure3}
 # Figure3A
 # RNA UMAP Tregs
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType == "Treg")
+seurat.tmp <- subset(seuratAgSpecific, cellType == "Treg")
 
 nClust <- length(table(seurat.tmp@meta.data$seurat_clusters_Treg))
 nClustString <- paste0("_", as.character(nClust), "Clusters")
@@ -2321,7 +2316,7 @@ savePlot(
 
 # Figure3B
 # RNA UMAP Tconvs
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType == "Tconv")
+seurat.tmp <- subset(seuratAgSpecific, cellType == "Tconv")
 
 nClust <- length(table(seurat.tmp@meta.data$seurat_clusters_Tconv))
 nClustString <- paste0("_", as.character(nClust), "Clusters")
@@ -2349,7 +2344,7 @@ savePlot(
 
 # Figure 3C
 # RNA UMAP Tregs, stimulation
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType == "Treg")
+seurat.tmp <- subset(seuratAgSpecific, cellType == "Treg")
 
 nClust <- length(table(seurat.tmp@meta.data$seurat_clusters_Treg))
 nClustString <- paste0("_", as.character(nClust), "Clusters")
@@ -2377,7 +2372,7 @@ savePlot(
 
 # Figure 3D
 # RNA UMAP Tconvs, stimulation
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType == "Tconv")
+seurat.tmp <- subset(seuratAgSpecific, cellType == "Tconv")
 
 nClust <- length(table(seurat.tmp@meta.data$seurat_clusters_Tconv))
 nClustString <- paste0("_", as.character(nClust), "Clusters")
@@ -2787,8 +2782,8 @@ airlinePlot <- function(seuratObj,
 }
 
 # make subset Seurat object
-seurat.tmp <- subset(seuratQCMergedCleaned, subset = cellType %in% c("Treg", "Tconv")) # limit to just the Treg/Tconv cells. Exclude 'Other'
-seurat.tmp <- subset(seurat.tmp, subset = stimulationFigures == "IAR")
+seurat.tmp <- subset(seuratAgSpecific, subset = stimulationFigures == "IAR")
+
 # cleanTCRAgSpecificInterStimPairs.df
 # plot airline
 airlinePlot(seuratObj = seurat.tmp,
@@ -2805,8 +2800,7 @@ airlinePlot(seuratObj = seurat.tmp,
   minClones = 2)
 
 # make subset Seurat object
-seurat.tmp <- subset(seuratQCMergedCleaned, subset = cellType %in% c("Treg", "Tconv")) # limit to just the Treg/Tconv cells. Exclude 'Other'
-seurat.tmp <- subset(seurat.tmp, subset = stimulationFigures == "Polyclonal")
+seurat.tmp <- subset(seuratAgSpecific, subset = stimulationFigures == "Polyclonal")
 
 # plot airline
 airlinePlot(seuratObj = seurat.tmp,
@@ -2823,8 +2817,7 @@ airlinePlot(seuratObj = seurat.tmp,
   minClones = 2)
 
 # make subset Seurat object
-seurat.tmp <- subset(seuratQCMergedCleaned, subset = cellType %in% c("Treg", "Tconv")) # limit to just the Treg/Tconv cells. Exclude 'Other'
-seurat.tmp <- subset(seurat.tmp, subset = stimulationFigures == "Microbial")
+seurat.tmp <- subset(seuratAgSpecific, subset = stimulationFigures == "Microbial")
 
 # plot airline
 airlinePlot(seuratObj = seurat.tmp,
@@ -2841,8 +2834,7 @@ airlinePlot(seuratObj = seurat.tmp,
   minClones = 2)
 
 # make subset Seurat object
-seurat.tmp <- subset(seuratQCMergedCleanedDS, subset = cellType %in% c("Treg", "Tconv")) # limit to just the Treg/Tconv cells. Exclude 'Other'
-seurat.tmp <- subset(seurat.tmp, subset = stimulationFigures == "Microbial")
+seurat.tmp <- subset(seuratAgSpecific, subset = stimulationFigures == "Microbial")
 
 # plot airline
 airlinePlot(seuratObj = seurat.tmp,
@@ -2859,11 +2851,9 @@ airlinePlot(seuratObj = seurat.tmp,
   minClones = 2)
 
 # inter-stimulation version
-# make subset Seurat object
-seurat.tmp <- subset(seuratQCMergedCleaned, subset = cellType %in% c("Treg", "Tconv")) # limit to just the Treg/Tconv cells. Exclude 'Other'
 
 # plot airline
-airlinePlot(seuratObj = seurat.tmp,
+airlinePlot(seuratObj = seuratAgSpecific,
   tcrPairs = cleanTCRAgSpecificInterStimPairs.df,
   reductionName = "ref.umap_DS",
   displayVariable = "cellType", # variable to color the UMAP by
@@ -2879,7 +2869,7 @@ airlinePlot(seuratObj = seurat.tmp,
 
 # ---------------------Treg-only-----------------------------------------------------------
 # make subset Seurat object
-seurat.tmp <- subset(seuratQCMergedCleaned, subset = cellType %in% c("Treg")) # limit to just the Treg/Tconv cells. Exclude 'Other'
+seurat.tmp <- subset(seuratAgSpecific, subset = cellType %in% c("Treg")) # limit to just the Treg cells
 seurat.tmp <- subset(seurat.tmp, subset = stimulationFigures == "IAR")
 
 # plot airline
@@ -2897,7 +2887,7 @@ airlinePlot(seuratObj = seurat.tmp,
   minClones = 2)
 
 # make subset Seurat object
-seurat.tmp <- subset(seuratQCMergedCleaned, subset = cellType %in% c("Treg")) # limit to just the Treg/Tconv cells. Exclude 'Other'
+seurat.tmp <- subset(seuratAgSpecific, subset = cellType %in% c("Treg")) # limit to just the Treg cells
 seurat.tmp <- subset(seurat.tmp, subset = stimulationFigures == "Polyclonal")
 
 # plot airline
@@ -2915,7 +2905,7 @@ airlinePlot(seuratObj = seurat.tmp,
   minClones = 2)
 
 # make subset Seurat object
-seurat.tmp <- subset(seuratQCMergedCleaned, subset = cellType %in% c("Treg")) # limit to just the Treg/Tconv cells. Exclude 'Other'
+seurat.tmp <- subset(seuratAgSpecific, subset = cellType %in% c("Treg")) # limit to just the Treg cells.
 seurat.tmp <- subset(seurat.tmp, subset = stimulationFigures == "Microbial")
 
 # plot airline
@@ -2934,7 +2924,7 @@ airlinePlot(seuratObj = seurat.tmp,
 
 # inter stimulation version
 # make subset Seurat object
-seurat.tmp <- subset(seuratQCMergedCleaned, subset = cellType %in% c("Treg")) # limit to just the Treg/Tconv cells. Exclude 'Other'
+seurat.tmp <- subset(seuratAgSpecific, subset = cellType %in% c("Treg")) # limit to just the Treg cells.
 
 # plot airline
 airlinePlot(seuratObj = seurat.tmp,
@@ -2953,7 +2943,7 @@ airlinePlot(seuratObj = seurat.tmp,
 
 # ---------------------Tconv-only-----------------------------------------------------------
 # make subset Seurat object
-seurat.tmp <- subset(seuratQCMergedCleaned, subset = cellType %in% c("Tconv")) # limit to just the Treg/Tconv cells. Exclude 'Other'
+seurat.tmp <- subset(seuratAgSpecific, subset = cellType %in% c("Tconv")) # limit to just the Tconv cells.
 seurat.tmp <- subset(seurat.tmp, subset = stimulationFigures == "IAR")
 
 # plot airline
@@ -2971,7 +2961,7 @@ airlinePlot(seuratObj = seurat.tmp,
   minClones = 2)
 
 # make subset Seurat object
-seurat.tmp <- subset(seuratQCMergedCleaned, subset = cellType %in% c("Tconv")) # limit to just the Tconv/Tconv cells. Exclude 'Other'
+seurat.tmp <- subset(seuratAgSpecific, subset = cellType %in% c("Tconv")) # limit to just the Tconv cells.
 seurat.tmp <- subset(seurat.tmp, subset = stimulationFigures == "Polyclonal")
 
 # plot airline
@@ -2989,7 +2979,7 @@ airlinePlot(seuratObj = seurat.tmp,
   minClones = 2)
 
 # make subset Seurat object
-seurat.tmp <- subset(seuratQCMergedCleaned, subset = cellType %in% c("Tconv")) # limit to just the Tconv/Tconv cells. Exclude 'Other'
+seurat.tmp <- subset(seuratAgSpecific, subset = cellType %in% c("Tconv")) # limit to just the Tconv cells.
 seurat.tmp <- subset(seurat.tmp, subset = stimulationFigures == "Microbial")
 
 # plot airline
@@ -3008,7 +2998,7 @@ airlinePlot(seuratObj = seurat.tmp,
 
 # inter stimulation version
 # make subset Seurat object
-seurat.tmp <- subset(seuratQCMergedCleaned, subset = cellType %in% c("Tconv")) # limit to just the Treg/Tconv cells. Exclude 'Other'
+seurat.tmp <- subset(seuratAgSpecific, subset = cellType %in% c("Tconv")) # limit to just the Tconv cells.
 
 # plot airline
 airlinePlot(seuratObj = seurat.tmp,
@@ -3085,8 +3075,8 @@ print(expansion_by_stim)
 expanded_status <- cleanTCRAgSpecificpairs.df.tmp %>%
   dplyr::select(barcode, expanded)
 
-# Subset cells
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType %in% c("Treg", "Tconv"))
+# Create temporary seurat object
+seurat.tmp <- seuratAgSpecific
 
 # Add expanded status to Seurat metadata
 seurat.tmp$expanded <- expanded_status$expanded[match(
@@ -3314,7 +3304,7 @@ for (i in 1:length(names(tables_to_save))) {
 
 
 # Tregs
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType %in% c("Treg"))
+seurat.tmp <- subset(seuratAgSpecific, cellType %in% c("Treg"))
 
 # Add to Seurat metadata
 seurat.tmp$expanded <- expanded_status$expanded[match(
@@ -3381,7 +3371,7 @@ print(results_df)
 
 
 # Tconv
-seurat.tmp <- subset(seuratQCMergedCleaned, cellType %in% c("Tconv"))
+seurat.tmp <- subset(seuratAgSpecific, cellType %in% c("Tconv"))
 
 # Add to Seurat metadata
 seurat.tmp$expanded <- expanded_status$expanded[match(

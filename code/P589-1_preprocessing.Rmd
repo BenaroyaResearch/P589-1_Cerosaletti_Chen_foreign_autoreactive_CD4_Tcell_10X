@@ -5102,6 +5102,10 @@ print(umap.trial.tmp)
 dev.off()
 ```
 
+```{r createAgSpecificSubsetSeuratObject}
+# Create a final seurat object that contains only the antigen-specific cells
+seuratAgSpecific <- subset(seuratQCMergedCleaned, cellType %in% c("Treg", "Tconv"))
+```
 ```{r savePreprocData}
 # save the workspace as an .RData file
 save.image(file.path(dataOutputDir, "20250715_preprocData.RData"))

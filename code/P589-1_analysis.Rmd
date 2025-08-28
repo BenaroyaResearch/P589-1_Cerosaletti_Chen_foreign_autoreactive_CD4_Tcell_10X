@@ -155,7 +155,7 @@ savePlot <- function(
 # this version colors cells by CITEseq/FB/TotalSeq surface marker gating cellType
 airlinePlotFB <- function(seuratObj,
                           cloneIDColumn,
-                          cloneI
+                          cloneID,
                           arcLinewidth = 0.2, # nolint
                           arcAlpha = 0.5,
                           savePlot = FALSE,

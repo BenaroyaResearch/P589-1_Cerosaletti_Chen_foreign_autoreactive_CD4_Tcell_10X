@@ -25,3 +25,7 @@
 data/output/
 figures/
 documents/notes/
+
+# renv infrastructure (keep lockfile + activate.R tracked, ignore libs)
+renv/library/
+renv/staging/

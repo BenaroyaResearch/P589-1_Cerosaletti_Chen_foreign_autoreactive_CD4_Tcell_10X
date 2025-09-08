@@ -11,6 +11,8 @@ editor_options:
 ---
 
 ```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+# Author: Thomas H. Edwards
+# Collaborators: Karen Cerosaletti, Janice Chen, Alex Hu, Matt Dufort, Hannah DeBerg
 setwd("/Users/tedwards/Documents/projects/P589-1_Cerosaletti_Chen_foreign_autoreactive_CD4_Tcell_10X")
 
 library(knitr)
@@ -6234,10 +6236,10 @@ plotGenesOfInterestStimFacet <- function(seuratObject, gene, fileName, reduction
 
   # Get UMAP coordinates directly from reduction
   umap_coords <- Embeddings(seuratObject, reduction = reductionName)
-  
+
   # Get other data
   other_data <- FetchData(seuratObject, vars = c("stimulationFigures", gene))
-  
+
   # Combine data
   data <- data.frame(
     umap_1 = umap_coords[, 1],
@@ -14361,7 +14363,7 @@ makeClusterExpansionUpsetPlots <- function(
       panel.grid.minor = element_blank()
     )
 
-    
+
 
   savePlot(
     plot = upset_plot,
@@ -14442,7 +14444,6 @@ makeClusterExpansionUpsetPlots(seuratObject = seurat.tmp,
   colors = colors,
   displayCounts = FALSE,
   filename = "polyclonal_TCR_Pair_Sharing_UpSet_Plot_noCounts")
-
 ```
 
 ```{r showCITEseqOnUMAPTregOnly}
@@ -22495,4 +22496,3008 @@ for (chain in c("TRB", "TRA", "Pair")) {
     dev.off()
   }
 }
+```
+
+```{r AgReactiveTCRPairsInterIntraStimAccounting}
+# First, determine expansion status across ALL data (any barcode sharing)
+cleanTCRAgSpecificPairs.df <- cleanTCRAgSpecificPairs.df %>%
+  mutate(expanded = fullLengthNT %in% fullLengthNT[duplicated(fullLengthNT)])
+
+# Define all possible stimulation combinations
+all_stims <- c("Microbial", "IAR", "Polyclonal")
+
+# Generate all combinations: single, pairs, and triplets
+stim_combinations <- list(
+  # Single stimulations
+  "Microbial",
+  "IAR",
+  "Polyclonal",
+  # Pairs of stimulations
+  c("Microbial", "IAR"),
+  c("Microbial", "Polyclonal"),
+  c("IAR", "Polyclonal"),
+  # All three stimulations
+  c("Microbial", "IAR", "Polyclonal")
+)
+
+# Function to calculate TCR metrics for a given subset
+calculate_tcr_metrics <- function(data_subset, subset_name) {
+  if (nrow(data_subset) == 0) {
+    return(data.frame(
+      subset = subset_name,
+      total_pairs = 0,
+      unique_tcrs = 0,
+      expanded_pairs = 0,
+      unique_expanded_tcrs = 0,
+      percent_expansion = 0
+    ))
+  }
+
+  total_pairs <- nrow(data_subset)
+  unique_tcrs <- length(unique(data_subset$fullLengthNT))
+  expanded_pairs <- sum(data_subset$expanded)
+  unique_expanded_tcrs <- length(unique(data_subset$fullLengthNT[data_subset$expanded]))
+  percent_expansion <- (expanded_pairs / total_pairs) * 100
+
+  return(data.frame(
+    subset = subset_name,
+    total_pairs = total_pairs,
+    unique_tcrs = unique_tcrs,
+    expanded_pairs = expanded_pairs,
+    unique_expanded_tcrs = unique_expanded_tcrs,
+    percent_expansion = round(percent_expansion, 2)
+  ))
+}
+
+# Function to calculate Treg/Tconv sharing
+calculate_sharing <- function(treg_data, tconv_data) {
+  if (nrow(treg_data) == 0 || nrow(tconv_data) == 0) {
+    return(list(
+      treg_shared_with_tconv = 0,
+      tconv_shared_with_treg = 0,
+      unique_tcrs_shared = 0,
+      treg_shared_unique_tcrs = 0,
+      tconv_shared_unique_tcrs = 0
+    ))
+  }
+
+  treg_tcrs <- treg_data$fullLengthNT
+  tconv_tcrs <- tconv_data$fullLengthNT
+
+  # Get unique TCR sequences for each cell type
+  unique_treg_tcrs <- unique(treg_tcrs)
+  unique_tconv_tcrs <- unique(tconv_tcrs)
+
+  # Find shared unique TCR sequences
+  shared_unique_tcrs <- intersect(unique_treg_tcrs, unique_tconv_tcrs)
+
+  # Cell-level sharing (current method - counts individual cell pairs)
+  treg_shared_with_tconv <- sum(treg_tcrs %in% tconv_tcrs)
+  tconv_shared_with_treg <- sum(tconv_tcrs %in% treg_tcrs)
+
+  # Unique TCR-level sharing (new method - counts unique sequences)
+  treg_shared_unique_tcrs <- sum(unique_treg_tcrs %in% unique_tconv_tcrs)
+  tconv_shared_unique_tcrs <- sum(unique_tconv_tcrs %in% unique_treg_tcrs)
+
+  return(list(
+    treg_shared_with_tconv = treg_shared_with_tconv,
+    tconv_shared_with_treg = tconv_shared_with_treg,
+    unique_tcrs_shared = length(shared_unique_tcrs),
+    treg_shared_unique_tcrs = treg_shared_unique_tcrs,
+    tconv_shared_unique_tcrs = tconv_shared_unique_tcrs
+  ))
+}
+
+# Create mutually exclusive stimulation categories based on TCR sharing patterns
+# First, determine which stimulations each TCR appears in
+tcr_stim_mapping <- cleanTCRAgSpecificPairs.df %>%
+  group_by(fullLengthNT) %>%
+  summarise(
+    stims_present = list(unique(stimulationFigures)),
+    n_stims = length(unique(stimulationFigures)),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    stim_category = case_when(
+      # Single stimulations (TCR only appears in one stim)
+      n_stims == 1 & sapply(stims_present, function(x) "Microbial" %in% x) ~ "Microbial_only",
+      n_stims == 1 & sapply(stims_present, function(x) "IAR" %in% x) ~ "IAR_only",
+      n_stims == 1 & sapply(stims_present, function(x) "Polyclonal" %in% x) ~ "Polyclonal_only",
+      # Pairs of stimulations (TCR appears in exactly 2 stims)
+      n_stims == 2 & sapply(stims_present, function(x) all(c("Microbial", "IAR") %in% x)) ~ "Microbial_IAR",
+      n_stims == 2 & sapply(stims_present, function(x) all(c("Microbial", "Polyclonal") %in% x)) ~ "Microbial_Polyclonal",
+      n_stims == 2 & sapply(stims_present, function(x) all(c("IAR", "Polyclonal") %in% x)) ~ "IAR_Polyclonal",
+      # All three stimulations (TCR appears in all 3 stims)
+      n_stims == 3 ~ "All_three",
+      TRUE ~ "Other"
+    )
+  )
+
+# Debug: Check the mapping
+cat("=== Debugging TCR Stimulation Mapping ===\n")
+cat("Number of unique TCRs:", nrow(tcr_stim_mapping), "\n")
+cat("Category breakdown in mapping:\n")
+print(table(tcr_stim_mapping$stim_category, useNA = "always"))
+cat("Sample of mapping data:\n")
+print(head(tcr_stim_mapping))
+cat("==========================================\n\n") # Add category information back to main dataframe
+cleanTCRAgSpecificPairs.df <- cleanTCRAgSpecificPairs.df %>%
+  left_join(tcr_stim_mapping %>% select(fullLengthNT, stim_category), by = "fullLengthNT")
+
+# Debug: Check if the join worked
+cat("=== Debugging TCR Category Assignment ===\n")
+cat("Number of rows in cleanTCRAgSpecificPairs.df:", nrow(cleanTCRAgSpecificPairs.df), "\n")
+cat("Column names:", paste(colnames(cleanTCRAgSpecificPairs.df), collapse = ", "), "\n")
+cat("Number of TCRs with categories assigned:", sum(!is.na(cleanTCRAgSpecificPairs.df$stim_category)), "\n")
+cat("Category breakdown:\n")
+print(table(cleanTCRAgSpecificPairs.df$stim_category, useNA = "always"))
+cat("========================================\n\n")
+
+# Define the 7 mutually exclusive categories
+categories <- c("Microbial_only", "IAR_only", "Polyclonal_only",
+  "Microbial_IAR", "Microbial_Polyclonal", "IAR_Polyclonal",
+  "All_three")
+
+# Initialize results dataframes
+all_celltype_results <- data.frame()
+treg_results <- data.frame()
+tconv_results <- data.frame()
+
+cat("=== TCR Pair Accounting Analysis (Mutually Exclusive Categories) ===\n\n")
+
+# Pre-loop debugging: Check if stim_category column exists
+cat("=== Pre-loop Debugging ===\n")
+cat("Column names in cleanTCRAgSpecificPairs.df:\n")
+print(colnames(cleanTCRAgSpecificPairs.df))
+cat("\nChecking for stim_category column:\n")
+if ("stim_category" %in% colnames(cleanTCRAgSpecificPairs.df)) {
+  cat("✓ stim_category column found\n")
+  cat("stim_category breakdown:\n")
+  print(table(cleanTCRAgSpecificPairs.df$stim_category, useNA = "always"))
+} else {
+  cat("✗ ERROR: stim_category column NOT found!\n")
+  cat("This suggests the tcr_stim_mapping join failed.\n")
+  cat("Attempting to recreate stim_category...\n")
+
+  # Recreate the stim_category if it's missing
+  tcr_stim_mapping <- cleanTCRAgSpecificPairs.df %>%
+    group_by(fullLengthNT) %>%
+    summarise(
+      stims_present = list(unique(stimulationFigures)),
+      n_stims = length(unique(stimulationFigures)),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      stim_category = case_when(
+        # Single stimulations (TCR only appears in one stim)
+        n_stims == 1 & sapply(stims_present, function(x) "Microbial" %in% x) ~ "Microbial_only",
+        n_stims == 1 & sapply(stims_present, function(x) "IAR" %in% x) ~ "IAR_only",
+        n_stims == 1 & sapply(stims_present, function(x) "Polyclonal" %in% x) ~ "Polyclonal_only",
+        # Pairs of stimulations (TCR appears in exactly 2 stims)
+        n_stims == 2 & sapply(stims_present, function(x) all(c("Microbial", "IAR") %in% x)) ~ "Microbial_IAR",
+        n_stims == 2 & sapply(stims_present, function(x) all(c("Microbial", "Polyclonal") %in% x)) ~ "Microbial_Polyclonal",
+        n_stims == 2 & sapply(stims_present, function(x) all(c("IAR", "Polyclonal") %in% x)) ~ "IAR_Polyclonal",
+        # All three stimulations (TCR appears in all 3 stims)
+        n_stims == 3 ~ "All_three",
+        TRUE ~ "Other"
+      )
+    )
+
+  # Re-join the category information
+  cleanTCRAgSpecificPairs.df <- cleanTCRAgSpecificPairs.df %>%
+    left_join(tcr_stim_mapping %>% select(fullLengthNT, stim_category), by = "fullLengthNT")
+
+  cat("✓ stim_category recreated and joined\n")
+  print(table(cleanTCRAgSpecificPairs.df$stim_category, useNA = "always"))
+}
+cat("=============================\n\n")
+
+# Loop through each category
+for (category in categories) {
+  cat("Category:", category, "\n")
+  cat(rep("=", nchar(category) + 10), "\n")
+
+  # Filter data for this category
+  combo_data <- cleanTCRAgSpecificPairs.df %>%
+    dplyr::filter(stim_category == category)
+
+  treg_data <- combo_data %>% dplyr::filter(cellType == "Treg")
+  tconv_data <- combo_data %>% dplyr::filter(cellType == "Tconv")
+
+  # Calculate metrics for all cell types
+  all_metrics <- calculate_tcr_metrics(combo_data, category)
+  all_celltype_results <- rbind(all_celltype_results, all_metrics)
+
+  cat("ALL CELL TYPES:\n")
+  cat("  Total TCR pairs:", all_metrics$total_pairs, "\n")
+  cat("  Unique TCRs:", all_metrics$unique_tcrs, "\n")
+  cat("  Expanded pairs:", all_metrics$expanded_pairs, "\n")
+  cat("  Unique expanded TCRs:", all_metrics$unique_expanded_tcrs, "\n")
+  cat("  Percent expansion:", all_metrics$percent_expansion, "%\n\n")
+
+  # Calculate sharing between Treg and Tconv
+  sharing_metrics <- calculate_sharing(treg_data, tconv_data)
+
+  # Calculate metrics for Tregs only
+  treg_metrics <- calculate_tcr_metrics(treg_data, category)
+  treg_metrics$shared_with_tconv <- sharing_metrics$treg_shared_with_tconv
+  treg_metrics$shared_unique_tcrs <- sharing_metrics$treg_shared_unique_tcrs
+  treg_results <- rbind(treg_results, treg_metrics)
+
+  cat("TREG ONLY:\n")
+  cat("  Total TCR pairs:", treg_metrics$total_pairs, "\n")
+  cat("  Unique TCRs:", treg_metrics$unique_tcrs, "\n")
+  cat("  Expanded pairs:", treg_metrics$expanded_pairs, "\n")
+  cat("  Unique expanded TCRs:", treg_metrics$unique_expanded_tcrs, "\n")
+  cat("  Percent expansion:", treg_metrics$percent_expansion, "%\n")
+  cat("  TCR pairs shared with Tconv (cell-level):", sharing_metrics$treg_shared_with_tconv, "\n")
+  cat("  Unique TCRs shared with Tconv:", sharing_metrics$treg_shared_unique_tcrs, "\n\n")
+
+  # Calculate metrics for Tconvs only
+  tconv_metrics <- calculate_tcr_metrics(tconv_data, category)
+  tconv_metrics$shared_with_treg <- sharing_metrics$tconv_shared_with_treg
+  tconv_metrics$shared_unique_tcrs <- sharing_metrics$tconv_shared_unique_tcrs
+  tconv_results <- rbind(tconv_results, tconv_metrics)
+
+  cat("TCONV ONLY:\n")
+  cat("  Total TCR pairs:", tconv_metrics$total_pairs, "\n")
+  cat("  Unique TCRs:", tconv_metrics$unique_tcrs, "\n")
+  cat("  Expanded pairs:", tconv_metrics$expanded_pairs, "\n")
+  cat("  Unique expanded TCRs:", tconv_metrics$unique_expanded_tcrs, "\n")
+  cat("  Percent expansion:", tconv_metrics$percent_expansion, "%\n")
+  cat("  TCR pairs shared with Treg (cell-level):", sharing_metrics$tconv_shared_with_treg, "\n")
+  cat("  Unique TCRs shared with Treg:", sharing_metrics$tconv_shared_unique_tcrs, "\n")
+  cat("  Total unique TCRs shared between cell types:", sharing_metrics$unique_tcrs_shared, "\n\n")
+
+  cat("\n")
+}
+
+# Print summary tables
+cat("=== SUMMARY TABLES ===\n\n")
+
+cat("All Cell Types Summary:\n")
+print(all_celltype_results)
+
+cat("\nTreg Summary:\n")
+print(treg_results)
+
+cat("\nTconv Summary:\n")
+print(tconv_results)
+
+# Save results to files
+write.csv(all_celltype_results, file.path(dataOutputDir, "TCR_accounting_all_celltypes.csv"), row.names = FALSE)
+write.csv(treg_results, file.path(dataOutputDir, "TCR_accounting_Treg.csv"), row.names = FALSE)
+write.csv(tconv_results, file.path(dataOutputDir, "TCR_accounting_Tconv.csv"), row.names = FALSE)
+
+cat("\nResults saved to:", dataOutputDir, "\n")
+
+# Create cleanTCRAgSpecificInterStimPairs.df with only inter-stimulation TCRs
+# (TCRs found in 2 or 3 stimulations)
+inter_stim_categories <- c("Microbial_IAR", "Microbial_Polyclonal", "IAR_Polyclonal", "All_three")
+
+cleanTCRAgSpecificInterStimPairs.df <- cleanTCRAgSpecificPairs.df %>%
+  filter(stim_category %in% inter_stim_categories)
+
+cat("\n=== Inter-Stimulation TCR Pairs ===\n")
+cat("Total inter-stim TCR pairs:", nrow(cleanTCRAgSpecificInterStimPairs.df), "\n")
+cat("Breakdown by category:\n")
+print(table(cleanTCRAgSpecificInterStimPairs.df$stim_category))
+cat("Breakdown by cell type:\n")
+print(table(cleanTCRAgSpecificInterStimPairs.df$cellType, cleanTCRAgSpecificInterStimPairs.df$stim_category))
+cat("===================================\n")
+```
+
+```{r examineClusterLevelsTconv}
+# Process hyperparameter grid to handle NA values and keep only the last row per nClusters
+optHyperParamGrid.df <- read.xlsx(file.path(dataOutputDir, "20250611_RNA_clustering_TconvOnly_hyperParamGrid.xlsx")) %>%
+  data.frame() %>%
+  # Remove rows with NA in required parameters
+  filter(!is.na(findNeighborsDim) & !is.na(findClustersRes) & !is.na(min.dist) & !is.na(n_neighbors)) %>%
+  # Group by nClusters and keep the last row in each group
+  group_by(nClusters) %>%
+  slice_tail(n = 1) %>%
+  ungroup()
+
+# Print a summary of the hyperparameter combinations we'll be testing
+print(paste("Processing", nrow(optHyperParamGrid.df), "hyperparameter combinations"))
+print(optHyperParamGrid.df[, c("nClusters", "findNeighborsDim", "findClustersRes", "min.dist", "n_neighbors")])
+
+# For each selected hyperparameter combination
+for (i in 1:nrow(optHyperParamGrid.df)) {
+  # Extract hyperparameters for this row
+  findNeighborsDim <- optHyperParamGrid.df$findNeighborsDim[i]
+  findClustersRes <- optHyperParamGrid.df$findClustersRes[i]
+  min.dist <- optHyperParamGrid.df$min.dist[i]
+  n_neighbors <- optHyperParamGrid.df$n_neighbors[i]
+  expected_clusters <- optHyperParamGrid.df$nClusters[i]
+
+  current_iter <- i  # Store the current iteration number for use in nested operations
+
+  cat(sprintf("\nProcessing hyperparameter set %d/%d: dims=%d, res=%.2f, min.dist=%.2f, n_neighbors=%d (expecting %d clusters)\n",
+    current_iter, nrow(optHyperParamGrid.df),
+    findNeighborsDim, findClustersRes, min.dist, n_neighbors, expected_clusters))
+
+  # ==========Re-clustering with the current set of hyperparameters================
+  # Reset the Seurat object to original state before reclustering
+  DefaultAssay(seuratTconv) <- "RNA"
+
+  set.seed(6022)
+  seuratTconv <- FindNeighbors(seuratTconv, dims = 1:findNeighborsDim)
+  seuratTconv <- FindClusters(seuratTconv, resolution = findClustersRes)
+
+  set.seed(6022)
+  seuratTconv <- RunUMAP(object = seuratTconv,
+    reduction = "pca",
+    return.model = TRUE,
+    dims = 1:findNeighborsDim,
+    n.neighbors = n_neighbors,
+    min.dist = min.dist)
+
+  # Store cluster info in seurat object metadata
+  # Initialize clusterName and clusterMarkers
+  clusterName <- character()
+  clusterMarkers <- list()
+
+  # Create the cluster name for RNA
+  clusterName <- "seurat_clusters_Tconv"
+
+  # Add metadata to the Seurat object
+  seuratTconv <- seuratTconv %>%
+    Seurat::AddMetaData(Idents(seuratTconv), col.name = clusterName)
+
+  # Set the identifiers
+  Idents(seuratTconv) <- seuratTconv@meta.data[[clusterName]]
+
+  # Ensure data layers are joined
+  seuratTconv <- JoinLayers(seuratTconv)
+
+  # Get the actual number of clusters (may differ from expected)
+  num_clusters <- n_distinct(seuratTconv@meta.data[[clusterName]])
+  nClustString <- paste0("_", as.character(num_clusters), "Clusters")
+
+  # Check if the actual number of clusters matches expected
+  if (num_clusters != expected_clusters) {
+    cat(sprintf("Warning: Expected %d clusters but found %d clusters\n", expected_clusters, num_clusters))
+  }
+
+  # Generate a fresh color palette for the specific number of clusters in this iteration
+  palRNAClustersTconv <- paletteer_d("khroma::land", n = num_clusters) %>%
+    sample() %>%  # Shuffle colors
+    .[!grepl("yellow|black", .)] %>%  # Drop yellow and black colors
+    setNames(sort(unique(seuratTconv@meta.data[[clusterName]])))
+
+  # Find cluster markers for this iteration
+  clusterMarkers <- list()
+  clusterMarkers[[paste0("RNA_", clusterName)]] <- FindAllMarkers(seuratTconv, assay = "RNA")
+
+  # Filter for genes expressed in at least 30% of cells in their cluster
+  expressionData <- FetchData(seuratTconv, vars = unique(clusterMarkers[[paste0("RNA_", clusterName)]]$gene))
+  metadata <- seuratTconv@meta.data %>%
+    dplyr::select(seurat_clusters) %>%
+    rownames_to_column("cell")
+
+  expressionData <- expressionData %>%
+    rownames_to_column("cell") %>%
+    left_join(metadata, by = "cell")
+
+  expressionDataLong <- expressionData %>%
+    pivot_longer(cols = -c(cell, seurat_clusters), names_to = "gene", values_to = "expression")
+
+  expressionDataSummary <- expressionDataLong %>%
+    group_by(seurat_clusters, gene) %>%
+    summarise(percent_expressed = mean(expression > 0) * 100, .groups = "drop")
+
+  min_percent_expressed <- 30
+  clusterMarkers[[paste0("RNA_", clusterName)]] <- clusterMarkers[[paste0("RNA_", clusterName)]] %>%
+    left_join(expressionDataSummary, by = c("cluster" = "seurat_clusters", "gene" = "gene")) %>%
+    filter(percent_expressed >= min_percent_expressed)
+
+  # Get top markers for plotting (10 per cluster)
+  topMarkersPlotLong <- clusterMarkers[[paste0("RNA_", clusterName)]] %>%
+    dplyr::group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 0) %>%
+    dplyr::slice_max(avg_log2FC, n = 10) %>%
+    dplyr::slice_min(p_val_adj, n = 10) %>%
+    dplyr::mutate(fc_order = order(avg_log2FC))
+
+  topMarkersPlot <- topMarkersPlotLong %>%
+    pivot_wider(id_cols = "fc_order",
+      names_from = "cluster",
+      values_from = "gene") %>%
+    dplyr::select(-one_of("fc_order"))
+
+  # Also save the top 30 genes per cluster
+  nGenes <- 30
+  nGenesString <- as.character(nGenes)
+  nGenesPlot <- 10
+  nGenesStringPlot <- as.character(nGenesPlot)
+
+  topMarkersLong <- clusterMarkers[[paste0("RNA_", clusterName)]] %>%
+    dplyr::group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 0) %>%
+    dplyr::slice_max(avg_log2FC, n = nGenes) %>%
+    dplyr::slice_min(p_val_adj, n = nGenes) %>%
+    dplyr::mutate(fc_order = order(avg_log2FC))
+
+  topMarkers <- topMarkersLong %>%
+    pivot_wider(id_cols = "fc_order",
+      names_from = "cluster",
+      values_from = "gene") %>%
+    dplyr::select(-one_of("fc_order"))
+
+  # Save the top cluster defining genes
+  write.csv(
+    topMarkers,
+    file.path(dataOutputDir, paste0("top", nGenesString, "_genes_per_cluster_Tconv", nClustString, ".csv")),
+    quote = FALSE,
+    row.names = TRUE
+  )
+
+  # =================Reference map the non-downsampled cells onto seuratTconv=============
+  # Create a fresh copy of seuratQCMergedCleaned for this iteration to avoid conflicts
+  seuratQCMergedCleaned_iter <- seuratQCMergedCleaned
+
+  # Remove any existing ref.umap and ref.umap_Tconv reductions to avoid conflicts
+  if ("ref.umap" %in% names(seuratQCMergedCleaned_iter@reductions)) {
+    seuratQCMergedCleaned_iter@reductions[["ref.umap"]] <- NULL
+  }
+  if ("ref.umap_Tconv" %in% names(seuratQCMergedCleaned_iter@reductions)) {
+    seuratQCMergedCleaned_iter@reductions[["ref.umap_Tconv"]] <- NULL
+  }
+
+  # Normalize data
+  seuratQCMergedCleaned_iter <- NormalizeData(seuratQCMergedCleaned_iter,
+    verbose = FALSE,
+    normalization.method = "LogNormalize",
+    margin = 2,
+    assay = "RNA")
+  seuratTconv <- NormalizeData(seuratTconv,
+    verbose = FALSE,
+    normalization.method = "LogNormalize",
+    margin = 2,
+    assay = "RNA")
+
+  # Find variable features
+  seuratQCMergedCleaned_iter <- FindVariableFeatures(seuratQCMergedCleaned_iter,
+    selection.method = "vst", nfeatures = 2000, verbose = FALSE)
+  seuratTconv <- FindVariableFeatures(seuratTconv,
+    selection.method = "vst", nfeatures = 2000, verbose = FALSE)
+
+  # Find shared features
+  featuresShared <- intersect(VariableFeatures(seuratQCMergedCleaned_iter), VariableFeatures(seuratTconv))
+
+  # Find transfer anchors
+  anchors <- FindTransferAnchors(reference = seuratTconv, query = seuratQCMergedCleaned_iter,
+    features = featuresShared, reference.reduction = "pca")
+
+  # Transfer cluster labels with unique column name for this iteration
+  col_name <- paste0("seurat_clusters_Tconv_iter", current_iter)
+  predictions <- TransferData(anchorset = anchors, refdata = seuratTconv$seurat_clusters, dims = 1:30)
+  colnames(predictions)[1] <- col_name
+
+  # Add predictions to BOTH objects
+  seuratQCMergedCleaned <- AddMetaData(seuratQCMergedCleaned, metadata = predictions[, col_name], col.name = col_name)
+  seuratQCMergedCleaned_iter <- AddMetaData(seuratQCMergedCleaned_iter, metadata = predictions[, col_name], col.name = col_name)
+
+  # Project UMAP with explicit reduction name for this iteration
+  seuratQCMergedCleaned_iter <- MapQuery(
+    anchorset = anchors,
+    reference = seuratTconv,
+    query = seuratQCMergedCleaned_iter,
+    reference.reduction = "pca",
+    reduction.model = "umap"
+  )
+
+  # After mapping, rename the resulting reduction to keep iterations distinct
+  reduction_name <- paste0("ref.umap_Tconv_iter", current_iter)
+  seuratQCMergedCleaned_iter@reductions[["ref.umap"]]@key <- paste0("refumap", current_iter, "_")
+  seuratQCMergedCleaned_iter@reductions[[reduction_name]] <- seuratQCMergedCleaned_iter@reductions[["ref.umap"]]
+
+  # ================Make a dotplot from the top 10 cluster-defining genes================
+  # Subset down to Tconv cells only for visualization
+  seurat.tmp <- subset(seuratQCMergedCleaned_iter, cellType == "Tconv")
+
+  fontSize <- 8
+
+  # Extract the gene names from topMarkersPlot (top 10 per cluster)
+  genes.tmp <- unique(unlist(topMarkersPlot))
+
+  # Create a DotPlot using the current iteration's predictions
+  dotPlot.tmp <- DotPlot(seurat.tmp, dot.scale = 3.75, features = genes.tmp, group.by = col_name) +
+    theme(axis.text.x = element_text(angle = 60, hjust = 1, size = 8),
+      text = element_text(size = fontSize),
+      axis.text.y = element_text(size = fontSize),
+      axis.title.y = element_text(size = fontSize),
+      legend.text = element_text(size = fontSize),
+      legend.title = element_text(size = fontSize),
+      strip.text = element_text(size = fontSize),
+      plot.title = element_text(size = fontSize)) +
+    labs(y = "Tconv Clusters", x = "Cluster-defining genes") +
+    guides(color = guide_colorbar(title = "Average\nExpression\nz-score"),
+      size = guide_legend(title = "Percent\nExpressed")) +
+    scale_color_gradient2(low = "blue", mid = "white", high = "red")
+
+  # Save the dotplot
+  savePlot(
+    plot = dotPlot.tmp,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_top", nGenesStringPlot, "ClusterDefiningGenesDotPlotTconvs"),
+    height = 4,
+    width = 7,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+
+  # make a DotPlot with the 'curated' gene list
+  dotPlot.tmp <- DotPlot(seurat.tmp, dot.scale = 3.75, features = geneListTconvCurated, group.by = col_name) +
+    theme(axis.text.x = element_text(angle = 60, hjust = 1, size = 8),
+      text = element_text(size = fontSize),
+      axis.text.y = element_text(size = fontSize),
+      axis.title.y = element_text(size = fontSize),
+      legend.text = element_text(size = fontSize),
+      legend.title = element_text(size = fontSize),
+      strip.text = element_text(size = fontSize),
+      plot.title = element_text(size = fontSize)) +
+    labs(y = "Treg Clusters", x = "Curated genes (Tconv)") +
+    guides(color = guide_colorbar(title = "Average\nExpression\nz-score"),
+      size = guide_legend(title = "Percent\nExpressed")) +
+    scale_color_gradient2(low = "blue", mid = "white", high = "red")
+
+  # Save the dotplot
+  savePlot(
+    plot = dotPlot.tmp,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "curatedGenesDotPlotTconvs"),
+    height = 4,
+    width = 7,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+
+  # ================Make UMAP colored by clusters================
+  seurat.tmp.umap <- seuratTconv
+  print(seurat.tmp.umap@reductions)
+  print(table(seurat.tmp.umap@meta.data$seurat_clusters))
+  print(table(seurat.tmp.umap@meta.data$seurat_clusters_Tconv))
+
+  set.seed(314)
+  plot.tmp <- DimPlot(object = seurat.tmp.umap,
+    reduction = "umap",
+    group = "seurat_clusters",
+    shuffle = TRUE,
+    pt.size = 1) +
+    scale_color_manual(values = palRNAClustersTconv) +
+    labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster", title = "") +
+    theme(aspect.ratio = 1)
+
+  savePlot(
+    plot = plot.tmp,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_UMAP_RNA_TconvOnly"),
+    height = 6,
+    width = 10,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+
+  # ================Make UMAP colored by stimulation================
+  set.seed(314)
+  plot.tmp <- DimPlot(object = seurat.tmp.umap,
+    reduction = "umap",
+    group = "stimulationFigures",
+    shuffle = TRUE,
+    pt.size = 1) +
+    scale_color_manual(values = palStimulation) +
+    labs(x = "UMAP 1", y = "UMAP 2", color = "Stimulation", title = "") +
+    theme(aspect.ratio = 1)
+
+  savePlot(
+    plot = plot.tmp,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_UMAP_RNA_TconvOnly_stimulation"),
+    height = 6,
+    width = 10,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+  # ================Make UMAP colored by CellTypistL1================
+  set.seed(314)
+  plot.tmp <- DimPlot(object = seurat.tmp.umap,
+    reduction = "umap",
+    group = "cellTypistCalling",
+    shuffle = TRUE,
+    pt.size = 1) +
+    labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster", title = "") +
+    theme(aspect.ratio = 1)
+
+  savePlot(
+    plot = plot.tmp,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_UMAP_RNA_TconvOnly_cellTypistL1"),
+    height = 6,
+    width = 10,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+
+  # ================Make UMAP colored by CellTypistL3================
+  set.seed(314)
+  plot.tmp <- DimPlot(object = seurat.tmp.umap,
+    reduction = "umap",
+    group = "cellTypistCallingL3",
+    shuffle = TRUE,
+    pt.size = 1) +
+    scale_color_manual(values = palCellTypistL3) +
+    labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster", title = "") +
+    theme(aspect.ratio = 1)
+
+  savePlot(
+    plot = plot.tmp,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_UMAP_RNA_TconvOnly_cellTypistL3"),
+    height = 6,
+    width = 10,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+  # ================Make reference-mapped UMAPs (showing only Tconv cells)================
+  # Create a subset with only Tconv cells
+  seurat.ref.map <- subset(seuratQCMergedCleaned_iter, cellType == "Tconv")
+
+  # Get the specific reduction name for this iteration
+  ref_map_reduction <- paste0("ref.umap_Tconv_iter", current_iter)
+
+  # 1. UMAP colored by transferred clusters
+  set.seed(314)
+  ref_map_cluster_plot <- DimPlot(object = seurat.ref.map,
+    reduction = ref_map_reduction,
+    group.by = col_name,
+    shuffle = TRUE,
+    pt.size = 1) +
+    scale_color_manual(values = palRNAClustersTconv) +
+    labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster",
+      title = "Reference-mapped Tconv cells") +
+    theme(aspect.ratio = 1)
+
+  savePlot(
+    plot = ref_map_cluster_plot,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_UMAP_RefMapped_TconvOnly_clusters"),
+    height = 6,
+    width = 10,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+
+  # 2. UMAP colored by stimulation
+  set.seed(314)
+  ref_map_stim_plot <- DimPlot(object = seurat.ref.map,
+    reduction = ref_map_reduction,
+    group.by = "stimulationFigures",
+    shuffle = TRUE,
+    pt.size = 1) +
+    scale_color_manual(values = palStimulation) +
+    labs(x = "UMAP 1", y = "UMAP 2", color = "Stimulation",
+      title = "Reference-mapped Tconv cells") +
+    theme(aspect.ratio = 1)
+
+  savePlot(
+    plot = ref_map_stim_plot,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_UMAP_RefMapped_TconvOnly_stimulation"),
+    height = 6,
+    width = 10,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+
+  # 3. UMAP colored by CellTypistL1
+  set.seed(314)
+  ref_map_cluster_plot <- DimPlot(object = seurat.ref.map,
+    reduction = ref_map_reduction,
+    group.by = "cellTypistCalling",
+    shuffle = TRUE,
+    pt.size = 1) +
+    labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster",
+      title = "Reference-mapped Tconv cells") +
+    theme(aspect.ratio = 1)
+
+  savePlot(
+    plot = ref_map_cluster_plot,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_UMAP_RefMapped_TconvOnly_cellTypistL1"),
+    height = 6,
+    width = 10,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+
+  # 4. UMAP colored by CellTypistL3
+  set.seed(314)
+  ref_map_cluster_plot <- DimPlot(object = seurat.ref.map,
+    reduction = ref_map_reduction,
+    group.by = "cellTypistCallingL3",
+    shuffle = TRUE,
+    pt.size = 1) +
+    scale_color_manual(values = palCellTypistL3) +
+    labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster",
+      title = "Reference-mapped Tconv cells") +
+    theme(aspect.ratio = 1)
+
+  savePlot(
+    plot = ref_map_cluster_plot,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_UMAP_RefMapped_TconvOnly_cellTypistL3"),
+    height = 6,
+    width = 10,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+
+  # Clean up temporary variables - SAFELY check if they exist first
+  to_remove <- c()
+  if (exists("seuratQCMergedCleaned_iter")) to_remove <- c(to_remove, "seuratQCMergedCleaned_iter")
+  if (exists("anchors")) to_remove <- c(to_remove, "anchors")
+  if (exists("predictions")) to_remove <- c(to_remove, "predictions")
+  if (exists("seurat.tmp")) to_remove <- c(to_remove, "seurat.tmp")
+  if (exists("seurat.tmp.umap")) to_remove <- c(to_remove, "seurat.tmp.umap")
+  if (exists("dotPlot.tmp")) to_remove <- c(to_remove, "dotPlot.tmp")
+  if (exists("plot.tmp")) to_remove <- c(to_remove, "plot.tmp")
+  if (exists("ref_map_cluster_plot")) to_remove <- c(to_remove, "ref_map_cluster_plot")
+  if (exists("ref_map_stim_plot")) to_remove <- c(to_remove, "ref_map_stim_plot")
+  if (exists("seurat.ref.map")) to_remove <- c(to_remove, "seurat.ref.map")
+
+  if (length(to_remove) > 0) {
+    rm(list = to_remove)
+  }
+
+  # Force garbage collection
+  gc()
+
+  # Keep the loop counter (i) intact!
+  cat(sprintf("Completed hyperparameter set %d/%d with %d clusters\n",
+    i, nrow(optHyperParamGrid.df), num_clusters))
+}
+
+# Final message
+cat("Processing complete!\n")
+```
+
+```{r examineClusterLevelsTreg}
+# Process hyperparameter grid to handle NA values and keep only the last row per nClusters
+optHyperParamGrid.df <- read.xlsx(file.path(dataOutputDir, "20250609_RNA_clustering_TregOnly_hyperParamGrid.xlsx")) %>%
+  data.frame() %>%
+  # Remove rows with NA in required parameters
+  filter(!is.na(findNeighborsDim) & !is.na(findClustersRes) & !is.na(min.dist) & !is.na(n_neighbors)) %>%
+  # Group by nClusters and keep the last row in each group
+  group_by(nClusters) %>%
+  slice_tail(n = 1) %>%
+  ungroup()
+
+# Print a summary of the hyperparameter combinations we'll be testing
+print(paste("Processing", nrow(optHyperParamGrid.df), "hyperparameter combinations"))
+print(optHyperParamGrid.df[, c("nClusters", "findNeighborsDim", "findClustersRes", "min.dist", "n_neighbors")])
+
+# For each selected hyperparameter combination
+for (i in 1:nrow(optHyperParamGrid.df)) {
+  # Extract hyperparameters for this row
+  findNeighborsDim <- optHyperParamGrid.df$findNeighborsDim[i]
+  findClustersRes <- optHyperParamGrid.df$findClustersRes[i]
+  min.dist <- optHyperParamGrid.df$min.dist[i]
+  n_neighbors <- optHyperParamGrid.df$n_neighbors[i]
+  expected_clusters <- optHyperParamGrid.df$nClusters[i]
+
+  current_iter <- i  # Store the current iteration number for use in nested operations
+
+  cat(sprintf("\nProcessing hyperparameter set %d/%d: dims=%d, res=%.2f, min.dist=%.2f, n_neighbors=%d (expecting %d clusters)\n",
+    current_iter, nrow(optHyperParamGrid.df),
+    findNeighborsDim, findClustersRes, min.dist, n_neighbors, expected_clusters))
+
+  # ==========Re-clustering with the current set of hyperparameters================
+  # Reset the Seurat object to original state before reclustering
+  DefaultAssay(seuratTreg) <- "RNA"
+
+  set.seed(6022)
+  seuratTreg <- FindNeighbors(seuratTreg, dims = 1:findNeighborsDim)
+  seuratTreg <- FindClusters(seuratTreg, resolution = findClustersRes)
+
+  set.seed(6022)
+  seuratTreg <- RunUMAP(object = seuratTreg,
+    reduction = "pca",
+    return.model = TRUE,
+    dims = 1:findNeighborsDim,
+    n.neighbors = n_neighbors,
+    min.dist = min.dist)
+
+  # Store cluster info in seurat object metadata
+  # Initialize clusterName and clusterMarkers
+  clusterName <- character()
+  clusterMarkers <- list()
+
+  # Create the cluster name for RNA
+  clusterName <- "seurat_clusters_Treg"
+
+  # Add metadata to the Seurat object
+  seuratTreg <- seuratTreg %>%
+    Seurat::AddMetaData(Idents(seuratTreg), col.name = clusterName)
+
+  # Set the identifiers
+  Idents(seuratTreg) <- seuratTreg@meta.data[[clusterName]]
+
+  # Ensure data layers are joined
+  seuratTreg <- JoinLayers(seuratTreg)
+
+  # Get the actual number of clusters (may differ from expected)
+  num_clusters <- n_distinct(seuratTreg@meta.data[[clusterName]])
+  nClustString <- paste0("_", as.character(num_clusters), "Clusters")
+
+  # Check if the actual number of clusters matches expected
+  if (num_clusters != expected_clusters) {
+    cat(sprintf("Warning: Expected %d clusters but found %d clusters\n", expected_clusters, num_clusters))
+  }
+
+  # Generate a fresh color palette for the specific number of clusters in this iteration
+  palRNAClustersTreg <- paletteer_d("khroma::okabeitoblack", n = num_clusters) %>%
+    sample() %>%  # Shuffle colors
+    .[!grepl("yellow|black", .)] %>%  # Drop yellow and black colors
+    setNames(sort(unique(seuratTreg@meta.data[[clusterName]])))
+
+  # Find cluster markers for this iteration
+  clusterMarkers <- list()
+  clusterMarkers[[paste0("RNA_", clusterName)]] <- FindAllMarkers(seuratTreg, assay = "RNA")
+
+  # Filter for genes expressed in at least 30% of cells in their cluster
+  expressionData <- FetchData(seuratTreg, vars = unique(clusterMarkers[[paste0("RNA_", clusterName)]]$gene))
+  metadata <- seuratTreg@meta.data %>%
+    dplyr::select(seurat_clusters) %>%
+    rownames_to_column("cell")
+
+  expressionData <- expressionData %>%
+    rownames_to_column("cell") %>%
+    left_join(metadata, by = "cell")
+
+  expressionDataLong <- expressionData %>%
+    pivot_longer(cols = -c(cell, seurat_clusters), names_to = "gene", values_to = "expression")
+
+  expressionDataSummary <- expressionDataLong %>%
+    group_by(seurat_clusters, gene) %>%
+    summarise(percent_expressed = mean(expression > 0) * 100, .groups = "drop")
+
+  min_percent_expressed <- 30
+  clusterMarkers[[paste0("RNA_", clusterName)]] <- clusterMarkers[[paste0("RNA_", clusterName)]] %>%
+    left_join(expressionDataSummary, by = c("cluster" = "seurat_clusters", "gene" = "gene")) %>%
+    filter(percent_expressed >= min_percent_expressed)
+
+  # Get top markers for plotting (10 per cluster)
+  topMarkersPlotLong <- clusterMarkers[[paste0("RNA_", clusterName)]] %>%
+    dplyr::group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 0) %>%
+    dplyr::slice_max(avg_log2FC, n = 10) %>%
+    dplyr::slice_min(p_val_adj, n = 10) %>%
+    dplyr::mutate(fc_order = order(avg_log2FC))
+
+  topMarkersPlot <- topMarkersPlotLong %>%
+    pivot_wider(id_cols = "fc_order",
+      names_from = "cluster",
+      values_from = "gene") %>%
+    dplyr::select(-one_of("fc_order"))
+
+  # Also save the top 30 genes per cluster
+  nGenes <- 30
+  nGenesString <- as.character(nGenes)
+  nGenesPlot <- 10
+  nGenesStringPlot <- as.character(nGenesPlot)
+
+  topMarkersLong <- clusterMarkers[[paste0("RNA_", clusterName)]] %>%
+    dplyr::group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 0) %>%
+    dplyr::slice_max(avg_log2FC, n = nGenes) %>%
+    dplyr::slice_min(p_val_adj, n = nGenes) %>%
+    dplyr::mutate(fc_order = order(avg_log2FC))
+
+  topMarkers <- topMarkersLong %>%
+    pivot_wider(id_cols = "fc_order",
+      names_from = "cluster",
+      values_from = "gene") %>%
+    dplyr::select(-one_of("fc_order"))
+
+  # Save the top cluster defining genes
+  write.csv(
+    topMarkers,
+    file.path(dataOutputDir, paste0("top", nGenesString, "_genes_per_cluster_Treg", nClustString, ".csv")),
+    quote = FALSE,
+    row.names = TRUE
+  )
+
+  # =================Reference map the non-downsampled cells onto seuratTreg=============
+  # Create a fresh copy of seuratQCMergedCleaned for this iteration to avoid conflicts
+  seuratQCMergedCleaned_iter <- seuratQCMergedCleaned
+
+  # Remove any existing ref.umap and ref.umap_Treg reductions to avoid conflicts
+  if ("ref.umap" %in% names(seuratQCMergedCleaned_iter@reductions)) {
+    seuratQCMergedCleaned_iter@reductions[["ref.umap"]] <- NULL
+  }
+  if ("ref.umap_Treg" %in% names(seuratQCMergedCleaned_iter@reductions)) {
+    seuratQCMergedCleaned_iter@reductions[["ref.umap_Treg"]] <- NULL
+  }
+
+  # Normalize data
+  seuratQCMergedCleaned_iter <- NormalizeData(seuratQCMergedCleaned_iter,
+    verbose = FALSE,
+    normalization.method = "LogNormalize",
+    margin = 2,
+    assay = "RNA")
+  seuratTreg <- NormalizeData(seuratTreg,
+    verbose = FALSE,
+    normalization.method = "LogNormalize",
+    margin = 2,
+    assay = "RNA")
+
+  # Find variable features
+  seuratQCMergedCleaned_iter <- FindVariableFeatures(seuratQCMergedCleaned_iter,
+    selection.method = "vst", nfeatures = 2000, verbose = FALSE)
+  seuratTreg <- FindVariableFeatures(seuratTreg,
+    selection.method = "vst", nfeatures = 2000, verbose = FALSE)
+
+  # Find shared features
+  featuresShared <- intersect(VariableFeatures(seuratQCMergedCleaned_iter), VariableFeatures(seuratTreg))
+
+  # Find transfer anchors
+  anchors <- FindTransferAnchors(reference = seuratTreg, query = seuratQCMergedCleaned_iter,
+    features = featuresShared, reference.reduction = "pca")
+
+  # Transfer cluster labels with unique column name for this iteration
+  col_name <- paste0("seurat_clusters_Treg_iter", current_iter)
+  predictions <- TransferData(anchorset = anchors, refdata = seuratTreg$seurat_clusters, dims = 1:30)
+  colnames(predictions)[1] <- col_name
+
+  # Add predictions to BOTH objects
+  seuratQCMergedCleaned <- AddMetaData(seuratQCMergedCleaned, metadata = predictions[, col_name], col.name = col_name)
+  seuratQCMergedCleaned_iter <- AddMetaData(seuratQCMergedCleaned_iter, metadata = predictions[, col_name], col.name = col_name)
+
+  # Project UMAP with explicit reduction name for this iteration
+  seuratQCMergedCleaned_iter <- MapQuery(
+    anchorset = anchors,
+    reference = seuratTreg,
+    query = seuratQCMergedCleaned_iter,
+    reference.reduction = "pca",
+    reduction.model = "umap"
+  )
+
+  # After mapping, rename the resulting reduction to keep iterations distinct
+  reduction_name <- paste0("ref.umap_Treg_iter", current_iter)
+  seuratQCMergedCleaned_iter@reductions[["ref.umap"]]@key <- paste0("refumap", current_iter, "_")
+  seuratQCMergedCleaned_iter@reductions[[reduction_name]] <- seuratQCMergedCleaned_iter@reductions[["ref.umap"]]
+
+  # ================Make a dotplot from the top 10 cluster-defining genes================
+  # Subset down to Treg cells only for visualization
+  seurat.tmp <- subset(seuratQCMergedCleaned_iter, cellType == "Treg")
+
+  fontSize <- 8
+
+  # Extract the gene names from topMarkersPlot (top 10 per cluster)
+  genes.tmp <- unique(unlist(topMarkersPlot))
+
+  # Create a DotPlot using the current iteration's predictions
+  dotPlot.tmp <- DotPlot(seurat.tmp, dot.scale = 3.75, features = genes.tmp, group.by = col_name) +
+    theme(axis.text.x = element_text(angle = 60, hjust = 1, size = 8),
+      text = element_text(size = fontSize),
+      axis.text.y = element_text(size = fontSize),
+      axis.title.y = element_text(size = fontSize),
+      legend.text = element_text(size = fontSize),
+      legend.title = element_text(size = fontSize),
+      strip.text = element_text(size = fontSize),
+      plot.title = element_text(size = fontSize)) +
+    labs(y = "Treg Clusters", x = "Cluster-defining genes") +
+    guides(color = guide_colorbar(title = "Average\nExpression\nz-score"),
+      size = guide_legend(title = "Percent\nExpressed")) +
+    scale_color_gradient2(low = "blue", mid = "white", high = "red")
+
+  # Save the dotplot
+  savePlot(
+    plot = dotPlot.tmp,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_top", nGenesStringPlot, "ClusterDefiningGenesDotPlotTregs"),
+    height = 4,
+    width = 7,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+
+  # make a DotPlot with the 'curated' gene list
+  dotPlot.tmp <- DotPlot(seurat.tmp, dot.scale = 3.75, features = geneListTregCurated, group.by = col_name) +
+    theme(axis.text.x = element_text(angle = 60, hjust = 1, size = 8),
+      text = element_text(size = fontSize),
+      axis.text.y = element_text(size = fontSize),
+      axis.title.y = element_text(size = fontSize),
+      legend.text = element_text(size = fontSize),
+      legend.title = element_text(size = fontSize),
+      strip.text = element_text(size = fontSize),
+      plot.title = element_text(size = fontSize)) +
+    labs(y = "Treg Clusters", x = "Curated genes (Treg)") +
+    guides(color = guide_colorbar(title = "Average\nExpression\nz-score"),
+      size = guide_legend(title = "Percent\nExpressed")) +
+    scale_color_gradient2(low = "blue", mid = "white", high = "red")
+
+  # Save the dotplot
+  savePlot(
+    plot = dotPlot.tmp,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "curatedGenesDotPlotTregs"),
+    height = 4,
+    width = 7,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+
+  # ================Make UMAP colored by clusters================
+  seurat.tmp.umap <- seuratTreg
+  print(seurat.tmp.umap@reductions)
+  print(table(seurat.tmp.umap@meta.data$seurat_clusters))
+  print(table(seurat.tmp.umap@meta.data$seurat_clusters_Treg))
+
+  set.seed(314)
+  plot.tmp <- DimPlot(object = seurat.tmp.umap,
+    reduction = "umap",
+    group = "seurat_clusters",
+    shuffle = TRUE,
+    pt.size = 1) +
+    scale_color_manual(values = palRNAClustersTreg) +
+    labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster", title = "") +
+    theme(aspect.ratio = 1)
+
+  savePlot(
+    plot = plot.tmp,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_UMAP_RNA_TregOnly"),
+    height = 6,
+    width = 10,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+
+  # ================Make UMAP colored by stimulation================
+  set.seed(314)
+  plot.tmp <- DimPlot(object = seurat.tmp.umap,
+    reduction = "umap",
+    group = "stimulationFigures",
+    shuffle = TRUE,
+    pt.size = 1) +
+    scale_color_manual(values = palStimulation) +
+    labs(x = "UMAP 1", y = "UMAP 2", color = "Stimulation", title = "") +
+    theme(aspect.ratio = 1)
+
+  savePlot(
+    plot = plot.tmp,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_UMAP_RNA_TregOnly_stimulation"),
+    height = 6,
+    width = 10,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+  # ================Make UMAP colored by CellTypistL1================
+  set.seed(314)
+  plot.tmp <- DimPlot(object = seurat.tmp.umap,
+    reduction = "umap",
+    group = "cellTypistCalling",
+    shuffle = TRUE,
+    pt.size = 1) +
+    labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster", title = "") +
+    theme(aspect.ratio = 1)
+
+  savePlot(
+    plot = plot.tmp,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_UMAP_RNA_TregOnly_cellTypistL1"),
+    height = 6,
+    width = 10,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+
+  # ================Make UMAP colored by CellTypistL3================
+  set.seed(314)
+  plot.tmp <- DimPlot(object = seurat.tmp.umap,
+    reduction = "umap",
+    group = "cellTypistCallingL3",
+    shuffle = TRUE,
+    pt.size = 1) +
+    scale_color_manual(values = palCellTypistL3) +
+    labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster", title = "") +
+    theme(aspect.ratio = 1)
+
+  savePlot(
+    plot = plot.tmp,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_UMAP_RNA_TregOnly_cellTypistL3"),
+    height = 6,
+    width = 10,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+
+  # ================Make reference-mapped UMAPs (showing only Treg cells)================
+  # Create a subset with only Treg cells
+  seurat.ref.map <- subset(seuratQCMergedCleaned_iter, cellType == "Treg")
+
+  # Get the specific reduction name for this iteration
+  ref_map_reduction <- paste0("ref.umap_Treg_iter", current_iter)
+
+  # 1. UMAP colored by transferred clusters
+  set.seed(314)
+  ref_map_cluster_plot <- DimPlot(object = seurat.ref.map,
+    reduction = ref_map_reduction,
+    group.by = col_name,
+    shuffle = TRUE,
+    pt.size = 1) +
+    scale_color_manual(values = palRNAClustersTreg) +
+    labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster",
+      title = "Reference-mapped Treg cells") +
+    theme(aspect.ratio = 1)
+
+  savePlot(
+    plot = ref_map_cluster_plot,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_UMAP_RefMapped_TregOnly_clusters"),
+    height = 6,
+    width = 10,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+
+  # 2. UMAP colored by stimulation
+  set.seed(314)
+  ref_map_stim_plot <- DimPlot(object = seurat.ref.map,
+    reduction = ref_map_reduction,
+    group.by = "stimulationFigures",
+    shuffle = TRUE,
+    pt.size = 1) +
+    scale_color_manual(values = palStimulation) +
+    labs(x = "UMAP 1", y = "UMAP 2", color = "Stimulation",
+      title = "Reference-mapped Treg cells") +
+    theme(aspect.ratio = 1)
+
+  savePlot(
+    plot = ref_map_stim_plot,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_UMAP_RefMapped_TregOnly_stimulation"),
+    height = 6,
+    width = 10,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+
+  # 3. UMAP colored by CellTypistL1
+  set.seed(314)
+  ref_map_cluster_plot <- DimPlot(object = seurat.ref.map,
+    reduction = ref_map_reduction,
+    group.by = "cellTypistCalling",
+    shuffle = TRUE,
+    pt.size = 1) +
+    labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster",
+      title = "Reference-mapped Treg cells") +
+    theme(aspect.ratio = 1)
+
+  savePlot(
+    plot = ref_map_cluster_plot,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_UMAP_RefMapped_TregOnly_cellTypistL1"),
+    height = 6,
+    width = 10,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+
+  # 4. UMAP colored by CellTypistL3
+  set.seed(314)
+  ref_map_cluster_plot <- DimPlot(object = seurat.ref.map,
+    reduction = ref_map_reduction,
+    group.by = "cellTypistCallingL3",
+    shuffle = TRUE,
+    pt.size = 1) +
+    scale_color_manual(values = palCellTypistL3) +
+    labs(x = "UMAP 1", y = "UMAP 2", color = "Cluster",
+      title = "Reference-mapped Treg cells") +
+    theme(aspect.ratio = 1)
+
+  savePlot(
+    plot = ref_map_cluster_plot,
+    plotDir = plotDir,
+    filename = paste0(nClustString, "_UMAP_RefMapped_TregOnly_cellTypistL3"),
+    height = 6,
+    width = 10,
+    units = "in",
+    dpi = 600,
+    formats = c("pdf", "png")
+  )
+
+  # Clean up temporary variables - SAFELY check if they exist first
+  to_remove <- c()
+  if (exists("seuratQCMergedCleaned_iter")) to_remove <- c(to_remove, "seuratQCMergedCleaned_iter")
+  if (exists("anchors")) to_remove <- c(to_remove, "anchors")
+  if (exists("predictions")) to_remove <- c(to_remove, "predictions")
+  if (exists("seurat.tmp")) to_remove <- c(to_remove, "seurat.tmp")
+  if (exists("seurat.tmp.umap")) to_remove <- c(to_remove, "seurat.tmp.umap")
+  if (exists("dotPlot.tmp")) to_remove <- c(to_remove, "dotPlot.tmp")
+  if (exists("plot.tmp")) to_remove <- c(to_remove, "plot.tmp")
+  if (exists("ref_map_cluster_plot")) to_remove <- c(to_remove, "ref_map_cluster_plot")
+  if (exists("ref_map_stim_plot")) to_remove <- c(to_remove, "ref_map_stim_plot")
+  if (exists("seurat.ref.map")) to_remove <- c(to_remove, "seurat.ref.map")
+
+  if (length(to_remove) > 0) {
+    rm(list = to_remove)
+  }
+
+  # Force garbage collection
+  gc()
+
+  # Keep the loop counter (i) intact!
+  cat(sprintf("Completed hyperparameter set %d/%d with %d clusters\n",
+    i, nrow(optHyperParamGrid.df), num_clusters))
+}
+
+# Final message
+cat("Processing complete!\n")
+```
+
+```{r cellCounts}
+# numbers of cells per donorIdFigures by $cellType, $stimulationFigures, and $seurat_clusters_DS
+
+# Extract metadata
+metadata <- seuratQCMergedCleaned@meta.data
+
+# replace "Other" in $cellType with "Not Ag-specific"
+metadata$cellType <- ifelse(metadata$cellType == "Other", "Not Ag-specific", metadata$cellType)
+
+# Create comprehensive cell count table
+cell_counts <- metadata %>%
+  group_by(donorIdFigures, cellType, stimulationFigures, seurat_clusters_DS) %>%
+  summarise(cell_count = n(), .groups = "drop") %>%
+  arrange(donorIdFigures, cellType, stimulationFigures, seurat_clusters_DS)
+
+# Create a summary table with totals
+summary_counts <- list(
+  # Detailed breakdown
+  "Detailed_Counts" = cell_counts,
+
+  # Total cells per donor by cell type and stimulation
+  "Donor_CellType_Stim" = metadata %>%
+    group_by(donorIdFigures, cellType, stimulationFigures) %>%
+    summarise(cell_count = n(), .groups = "drop") %>%
+    arrange(donorIdFigures, cellType, stimulationFigures),
+
+  # Total cells per donor by cell type
+  "Donor_CellType" = metadata %>%
+    group_by(donorIdFigures, cellType) %>%
+    summarise(cell_count = n(), .groups = "drop") %>%
+    arrange(donorIdFigures, cellType),
+
+  # Total cells per donor by stimulation
+  "Donor_Stimulation" = metadata %>%
+    group_by(donorIdFigures, stimulationFigures) %>%
+    summarise(cell_count = n(), .groups = "drop") %>%
+    arrange(donorIdFigures, stimulationFigures),
+
+  # Total cells per donor by cluster
+  "Donor_Cluster" = metadata %>%
+    group_by(donorIdFigures, seurat_clusters_DS) %>%
+    summarise(cell_count = n(), .groups = "drop") %>%
+    arrange(donorIdFigures, seurat_clusters_DS),
+
+  # Overall totals per donor
+  "Donor_Totals" = metadata %>%
+    group_by(donorIdFigures) %>%
+    summarise(total_cells = n(), .groups = "drop") %>%
+    arrange(donorIdFigures)
+)
+
+# Create filename with timestamp
+filename <- file.path(dataOutputDir, paste0(filenameSuffix, "CellCounts_Breakdown.xlsx"))
+
+# Write to Excel with multiple sheets
+write.xlsx(summary_counts, file = filename, rowNames = FALSE)
+
+# Print summary to console
+cat("Cell count summary saved to:", filename, "\n\n")
+cat("Total cells in dataset:", nrow(metadata), "\n")
+cat("Number of donors:", length(unique(metadata$donorIdFigures)), "\n")
+cat("Cell types:", paste(unique(metadata$cellType), collapse = ", "), "\n")
+cat("Stimulations:", paste(unique(metadata$stimulationFigures), collapse = ", "), "\n")
+cat("Number of clusters:", length(unique(metadata$seurat_clusters_DS)), "\n\n")
+
+# Print sample of detailed counts
+cat("Sample of detailed cell counts:\n")
+print(head(cell_counts, 10))
+
+# Print totals by cell type and stimulation
+cat("\nTotals by cell type and stimulation:\n")
+totals_summary <- metadata %>%
+  group_by(cellType, stimulationFigures) %>%
+  summarise(total_cells = n(), .groups = "drop") %>%
+  arrange(cellType, stimulationFigures)
+print(totals_summary)
+
+
+# Create a second Excel file with transposed layout (donors as columns, categories as rows)
+
+# 1. Cell type breakdown by donor
+celltype_by_donor <- metadata %>%
+  group_by(donorIdFigures, cellType) %>%
+  summarise(cell_count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = donorIdFigures, values_from = cell_count, values_fill = 0)
+
+# 2. Stimulation breakdown by donor
+stimulation_by_donor <- metadata %>%
+  group_by(donorIdFigures, stimulationFigures) %>%
+  summarise(cell_count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = donorIdFigures, values_from = cell_count, values_fill = 0)
+
+# 3. Cluster breakdown by donor
+cluster_by_donor <- metadata %>%
+  group_by(donorIdFigures, seurat_clusters_DS) %>%
+  summarise(cell_count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = donorIdFigures, values_from = cell_count, values_fill = 0) %>%
+  rename(category = seurat_clusters_DS) %>%
+  mutate(category = paste("Cluster", category))
+
+# 4. Total cells per donor
+total_by_donor <- metadata %>%
+  group_by(donorIdFigures) %>%
+  summarise(total_cells = n(), .groups = "drop") %>%
+  pivot_wider(names_from = donorIdFigures, values_from = total_cells) %>%
+  mutate(cellType = "Total") %>%
+  select(cellType, everything())
+
+# Rename columns to match
+colnames(celltype_by_donor)[1] <- "category"
+colnames(stimulation_by_donor)[1] <- "category"
+colnames(total_by_donor)[1] <- "category"
+
+# Combine all tables into one
+final_table <- bind_rows(
+  celltype_by_donor,
+  stimulation_by_donor,
+  cluster_by_donor,
+  total_by_donor
+)
+
+# Create filename for single sheet version
+filename_single <- file.path(dataOutputDir, paste0(filenameSuffix, "CellCountsCombined.xlsx"))
+
+# Write to Excel as a single sheet
+write.xlsx(final_table, file = filename_single, rowNames = FALSE)
+
+# Print summary
+cat("\nSingle table cell count summary saved to:", filename_single, "\n")
+cat("Layout: Single sheet with donors as columns, categories as separate row groups\n")
+cat("Total rows:", nrow(final_table), "\n")
+```
+
+```{r GSEAIARVsCEFX_geneRatioHorizontalAxis}
+# Get hallmark, C2, and C5 gene sets
+hs_sets <- msigdbr(species = "Homo sapiens", category = "H") %>%
+  dplyr::select(gs_name, gene_symbol)
+
+c7_sets <- msigdbr(species = "Homo sapiens", category = "C7") %>%
+  dplyr::select(gs_name, gene_symbol)
+
+c5_sets <- msigdbr(species = "Homo sapiens", category = "C5") %>%
+  dplyr::select(gs_name, gene_symbol)
+
+c2_sets <- msigdbr(species = "Homo sapiens", category = "C2") %>%
+  dplyr::select(gs_name, gene_symbol)
+
+# Define which categories to run
+categories <- c("H", "C2", "C5", "C7")
+
+comparisons <- list()
+comparisons[["results_Treg_IARVMicrobial"]] <- results_Treg_IARVMicrobial
+comparisons[["results_Tconv_IARVMicrobial"]] <- results_Tconv_IARVMicrobial
+
+# Create lists to store GSEA results and dotplots
+gsea_results <- list()
+
+for (comp in names(comparisons)) {
+  # Get DE results for this contrast and filter for significant genes
+  df <- comparisons[[comp]]
+  df_sig <- df %>% filter(adj.P.Val <= 0.1)
+  cat(nrow(df_sig), " significant genes for ", comp, "\n")
+
+  if (nrow(df_sig) < 10) {
+    message("Not enough significant genes for ", comp, ", skipping GSEA.")
+    next
+  }
+
+  # Split significant genes into "Up" and "Down" based on logFC sign
+  df_up <- df_sig %>% filter(logFC > 0)
+  df_down <- df_sig %>% filter(logFC < 0)
+
+  # Create a list to iterate over "Up" and "Down" groups
+  directions <- list("Up" = df_up, "Down" = df_down)
+
+  for (direction in names(directions)) {
+    df_dir <- directions[[direction]]
+    if (nrow(df_dir) < 10) {
+      message("Not enough significant genes for ", comp, " (", direction, "), skipping GSEA.")
+      next
+    }
+
+    # Create a ranked gene list using logFC (for significant genes in this direction)
+    geneList <- df_dir$logFC
+    names(geneList) <- df_dir$gene
+    geneList <- sort(geneList, decreasing = TRUE)
+
+    gsea_results[[comp]][[direction]] <- list()
+
+    # Run GSEA for each gene set collection (H, C2, C5, C7)
+    for (cat in categories) {
+      if (cat == "H") {
+        term2gene <- hs_sets
+      } else if (cat == "C5") {
+        term2gene <- c5_sets
+      } else if (cat == "C2") {
+        term2gene <- c2_sets
+      } else if (cat == "C7") {
+        term2gene <- c7_sets
+      }
+
+      gsea_obj <- GSEA(geneList, TERM2GENE = term2gene,
+        minGSSize = 10, maxGSSize = 1000,
+        pvalueCutoff = 0.05)
+
+      gsea_results[[comp]][[direction]][[cat]] <- gsea_obj
+
+      # Check if any term is enriched
+      if (nrow(gsea_obj@result) == 0) {
+        message("No enriched terms for ", comp, " (", direction, ") with category ", cat, ", skipping dotplot.")
+        next
+      }
+
+      # Produce a dotplot for the top enriched pathways (up to 15 categories)
+      dp <- dotplot(gsea_obj, showCategory = 15) +
+        ggtitle(paste(comp, "(", direction, " - ", cat, ")"))
+
+      # Save the dotplot as a PDF
+      pdf_filename <- file.path(plotDir, paste0(comp, "_GSEA_dotplot_", direction, "_", cat, ".pdf"))
+      pdf(file = pdf_filename, width = 9, height = 9)
+      print(dp)
+      dev.off()
+    }
+  }
+}
+```
+
+```{r GSEAIARVsCEFXDirectionSplit_enrichmentScoreHorizontalAxis}
+fontSize <- 12
+
+# Get hallmark, C2, and C5 gene sets
+hs_sets <- msigdbr(species = "Homo sapiens", category = "H") %>%
+  dplyr::select(gs_name, gene_symbol)
+
+c7_sets <- msigdbr(species = "Homo sapiens", category = "C7") %>%
+  dplyr::select(gs_name, gene_symbol)
+
+c5_sets <- msigdbr(species = "Homo sapiens", category = "C5") %>%
+  dplyr::select(gs_name, gene_symbol)
+
+c2_sets <- msigdbr(species = "Homo sapiens", category = "C2") %>%
+  dplyr::select(gs_name, gene_symbol)
+
+# Define which categories to run
+categories <- c("H", "C2", "C5", "C7")
+
+comparisons <- list()
+comparisons[["results_Treg_IARVMicrobial"]] <- results_Treg_IARVMicrobial
+comparisons[["results_Tconv_IARVMicrobial"]] <- results_Tconv_IARVMicrobial
+
+# Mapping for comparisons
+comparison_titles <- c(
+  "results_Treg_IARVMicrobial" = "Treg: IAR - Microbial",
+  "results_Tconv_IARVMicrobial" = "Tconv: IAR - Microbial"
+)
+
+# Mapping for gene set categories
+category_titles <- c(
+  "H" = "Hallmark",
+  "C2" = "Curated",
+  "C5" = "GO",
+  "C7" = "Immunologic"
+)
+
+# Create lists to store GSEA results and dotplots
+gsea_results <- list()
+
+for (comp in names(comparisons)) {
+  # Get DE results for this contrast and filter for significant genes
+  df <- comparisons[[comp]]
+  df_sig <- df %>% filter(adj.P.Val <= 0.1)
+  cat(nrow(df_sig), " significant genes for ", comp, "\n")
+
+  if (nrow(df_sig) < 10) {
+    message("Not enough significant genes for ", comp, ", skipping GSEA.")
+    next
+  }
+
+  # Split significant genes into "Up" and "Down" based on logFC sign
+  df_up <- df_sig %>% filter(logFC > 0)
+  df_down <- df_sig %>% filter(logFC < 0)
+
+  # Create a list to iterate over "Up" and "Down" groups
+  directions <- list("Up" = df_up, "Down" = df_down)
+
+  for (direction in names(directions)) {
+    df_dir <- directions[[direction]]
+    if (nrow(df_dir) < 10) {
+      message("Not enough significant genes for ", comp, " (", direction, "), skipping GSEA.")
+      next
+    }
+
+    # Create a ranked gene list using logFC (for significant genes in this direction)
+    geneList <- df_dir$logFC
+    names(geneList) <- df_dir$gene
+    geneList <- sort(geneList, decreasing = TRUE)
+
+    gsea_results[[comp]][[direction]] <- list()
+
+    # Run GSEA for each gene set collection (H, C2, C5, C7)
+    for (cat in categories) {
+      if (cat == "H") {
+        term2gene <- hs_sets
+      } else if (cat == "C5") {
+        term2gene <- c5_sets
+      } else if (cat == "C2") {
+        term2gene <- c2_sets
+      } else if (cat == "C7") {
+        term2gene <- c7_sets
+      }
+
+      gsea_obj <- GSEA(geneList, TERM2GENE = term2gene,
+        minGSSize = 10, maxGSSize = 1000,
+        pvalueCutoff = 0.05)
+
+      gsea_results[[comp]][[direction]][[cat]] <- gsea_obj
+
+      # Check if any term is enriched
+      if (nrow(gsea_obj@result) == 0) {
+        message("No enriched terms for ", comp, " (", direction, ") with category ", cat, ", skipping dotplot.")
+        next
+      }
+
+      # Filter for modules with gene count > 10
+      gsea_res_filt <- gsea_obj@result %>% dplyr::filter(setSize > 10)
+
+      if (nrow(gsea_res_filt) == 0) {
+        message("No enriched terms with gene count > 10 for ", comp, " (", direction, ") with category ", cat, ", skipping dotplot.")
+        next
+      }
+
+
+      # Dotplot: x-axis is NES (signed enrichment score), color by p.adjust (red=low, blue=high), size by gene count
+      gsea_res_filt_top <- gsea_res_filt %>% head(15)
+      pvals <- gsea_res_filt_top$p.adjust
+
+      if (length(unique(pvals)) == 1) {
+        # All p-values are the same, use a single color
+        dp.tmp <- ggplot(gsea_res_filt_top, aes(x = NES, y = reorder(Description, NES))) +
+          geom_point(aes(size = setSize), color = "red") +
+          labs(title = paste0(comparison_titles[comp], " (", category_titles[cat], ", ", direction, ")"),
+            x = "Normalized Enrichment Score (NES)",
+            y = "Gene Set",
+            size = "Gene Count",
+            color = "Adj. p-value"
+          ) +
+          theme_minimal(base_size = fontSize)
+      } else {
+        dp.tmp <- ggplot(gsea_res_filt_top, aes(x = NES, y = reorder(Description, NES))) +
+          geom_point(aes(size = setSize, color = p.adjust)) +
+          scale_color_gradient(
+            low = "red", high = "blue",
+            name = "Adj. p-value",
+            guide = guide_colorbar(reverse = TRUE)
+          ) +
+          labs(
+            title = paste(comp, "(", direction, "-", cat, ")"),
+            x = "Normalized Enrichment Score (NES)",
+            y = "Gene Set",
+            size = "Gene Count"
+          ) +
+          theme_minimal(base_size = fontSize)
+      }
+
+      # Save the dotplot
+      savePlot(
+        plot = dp.tmp,
+        plotDir = plotDir,
+        filename = paste0(comp, "_GSEA_dotplot_ES", direction, "_", cat),
+        height = 9,
+        width = 9,
+        units = "in",
+        dpi = 600,
+        formats = c("pdf", "png")
+      )
+
+    }
+  }
+}
+
+rm_tmp(ask = FALSE)
+```
+
+```{r GSEAIARVsCEFX_enrichmentScoreHorizontalAxis}
+fontSize <- 12
+
+# Get hallmark, C2, C5, and C7 gene sets
+hs_sets <- msigdbr(species = "Homo sapiens", category = "H") %>%
+  dplyr::select(gs_name, gene_symbol)
+c7_sets <- msigdbr(species = "Homo sapiens", category = "C7") %>%
+  dplyr::select(gs_name, gene_symbol)
+c5_sets <- msigdbr(species = "Homo sapiens", category = "C5") %>%
+  dplyr::select(gs_name, gene_symbol)
+c2_sets <- msigdbr(species = "Homo sapiens", category = "C2") %>%
+  dplyr::select(gs_name, gene_symbol)
+
+# Define which categories to run
+categories <- c("H", "C2", "C5", "C7")
+
+comparisons <- list()
+comparisons[["results_Treg_IARVMicrobial"]] <- results_Treg_IARVMicrobial
+comparisons[["results_Tconv_IARVMicrobial"]] <- results_Tconv_IARVMicrobial
+
+# Mapping for comparisons
+comparison_titles <- c(
+  "results_Treg_IARVMicrobial" = "Treg: IAR - Microbial",
+  "results_Tconv_IARVMicrobial" = "Tconv: IAR - Microbial"
+)
+
+# Mapping for gene set categories
+category_titles <- c(
+  "H" = "Hallmark",
+  "C2" = "Curated",
+  "C5" = "GO",
+  "C7" = "Immunologic"
+)
+
+# Create lists to store GSEA results and dotplots
+gsea_results <- list()
+
+for (comp in names(comparisons)) {
+  # Get DE results for this contrast and filter for significant genes
+  df <- comparisons[[comp]]
+  df_sig <- df %>% filter(adj.P.Val <= 0.1)
+  cat(nrow(df_sig), " significant genes for ", comp, "\n")
+
+  if (nrow(df_sig) < 10) {
+    message("Not enough significant genes for ", comp, ", skipping GSEA.")
+    next
+  }
+
+  # Split significant genes into "Up" and "Down" based on logFC sign
+  df_up <- df_sig %>% filter(logFC > 0)
+  df_down <- df_sig %>% filter(logFC < 0)
+
+  # Create a list to iterate over "Up" and "Down" groups
+  directions <- list("Up" = df_up, "Down" = df_down)
+
+  for (direction in names(directions)) {
+    df_dir <- directions[[direction]]
+    if (nrow(df_dir) < 10) {
+      message("Not enough significant genes for ", comp, " (", direction, "), skipping GSEA.")
+      next
+    }
+
+    # Create a ranked gene list using logFC (for significant genes in this direction)
+    geneList <- df_dir$logFC
+    names(geneList) <- df_dir$gene
+    geneList <- sort(geneList, decreasing = TRUE)
+
+    gsea_results[[comp]][[direction]] <- list()
+
+    # Run GSEA for each gene set collection (H, C2, C5, C7)
+    for (cat in categories) {
+      if (cat == "H") {
+        term2gene <- hs_sets
+      } else if (cat == "C5") {
+        term2gene <- c5_sets
+      } else if (cat == "C2") {
+        term2gene <- c2_sets
+      } else if (cat == "C7") {
+        term2gene <- c7_sets
+      }
+
+      gsea_obj <- GSEA(geneList, TERM2GENE = term2gene,
+        minGSSize = 10, maxGSSize = 1000,
+        pvalueCutoff = 0.05)
+
+      gsea_results[[comp]][[direction]][[cat]] <- gsea_obj
+
+      # Check if any term is enriched
+      if (nrow(gsea_obj@result) == 0) {
+        message("No enriched terms for ", comp, " (", direction, ") with category ", cat, ", skipping dotplot.")
+        next
+      }
+
+      # Filter for modules with gene count > 10
+      gsea_res_filt <- gsea_obj@result %>% dplyr::filter(setSize > 10)
+
+      if (nrow(gsea_res_filt) == 0) {
+        message("No enriched terms with gene count > 10 for ", comp, " (", direction, ") with category ", cat, ", skipping dotplot.")
+        next
+      }
+
+      # Dotplot: x-axis is NES (signed enrichment score), color by p.adjust (red=low, blue=high), size by gene count
+      gsea_res_filt_top <- gsea_res_filt %>% head(15)
+      pvals <- gsea_res_filt_top$p.adjust
+
+      if (length(unique(pvals)) == 1) {
+        # All p-values are the same, use a single color
+        dp.tmp <- ggplot(gsea_res_filt_top, aes(x = NES, y = reorder(Description, NES))) +
+          geom_point(aes(size = setSize), color = "red") +
+          labs(title = paste0(comparison_titles[comp], " (", category_titles[cat], ", ", direction, ")"),
+            x = "Normalized Enrichment Score (NES)",
+            y = "Gene Set",
+            size = "Gene Count",
+            color = "Adj. p-value"
+          ) +
+          theme_minimal(base_size = fontSize)
+      } else {
+        dp.tmp <- ggplot(gsea_res_filt_top, aes(x = NES, y = reorder(Description, NES))) +
+          geom_point(aes(size = setSize, color = p.adjust)) +
+          scale_color_gradient(
+            low = "red", high = "blue",
+            name = "Adj. p-value",
+            guide = guide_colorbar(reverse = TRUE)
+          ) +
+          labs(
+            title = paste(comp, "(", direction, "-", cat, ")"),
+            x = "Normalized Enrichment Score (NES)",
+            y = "Gene Set",
+            size = "Gene Count"
+          ) +
+          theme_minimal(base_size = fontSize)
+      }
+
+      # Save the dotplot
+      savePlot(
+        plot = dp.tmp,
+        plotDir = plotDir,
+        filename = paste0(comp, "_GSEA_dotplot_ES", direction, "_", cat),
+        height = 9,
+        width = 9,
+        units = "in",
+        dpi = 600,
+        formats = c("pdf", "png")
+      )
+
+    }
+  }
+}
+
+rm_tmp(ask = FALSE)
+```
+
+```{r GSEAHorizontalAxis}
+fontSize <- 12
+
+# Get hallmark, C2, C5, and C7 gene sets
+hs_sets <- msigdbr(species = "Homo sapiens", category = "H") %>%
+  dplyr::select(gs_name, gene_symbol)
+c7_sets <- msigdbr(species = "Homo sapiens", category = "C7") %>%
+  dplyr::select(gs_name, gene_symbol)
+c5_sets <- msigdbr(species = "Homo sapiens", category = "C5") %>%
+  dplyr::select(gs_name, gene_symbol)
+c2_sets <- msigdbr(species = "Homo sapiens", category = "C2") %>%
+  dplyr::select(gs_name, gene_symbol)
+
+categories <- c("H", "C2", "C5", "C7")
+
+comparisons <- list(
+  "results_Treg_IARVMicrobial" = results_Treg_IARVMicrobial,
+  "results_Tconv_IARVMicrobial" = results_Tconv_IARVMicrobial
+)
+
+comparison_titles <- c(
+  "results_Treg_IARVMicrobial" = "Treg: IAR - Microbial",
+  "results_Tconv_IARVMicrobial" = "Tconv: IAR - Microbial"
+)
+
+category_titles <- c(
+  "H" = "Hallmark",
+  "C2" = "Curated",
+  "C5" = "GO",
+  "C7" = "Immunologic"
+)
+
+gsea_results <- list()
+
+for (comp in names(comparisons)) {
+  df <- comparisons[[comp]]
+  df_sig <- df %>% filter(adj.P.Val <= 0.1)
+  cat(nrow(df_sig), " significant genes for ", comp, "\n")
+
+  if (nrow(df_sig) < 10) {
+    message("Not enough significant genes for ", comp, ", skipping GSEA.")
+    next
+  }
+
+  geneList <- df_sig$logFC
+  names(geneList) <- df_sig$gene
+  geneList <- sort(geneList, decreasing = TRUE)
+
+  gsea_results[[comp]] <- list()
+
+  for (cat in categories) {
+    term2gene <- switch(cat,
+      "H" = hs_sets,
+      "C2" = c2_sets,
+      "C5" = c5_sets,
+      "C7" = c7_sets
+    )
+
+    # DEBUG: Print gene list info
+    cat("DEBUG - comp:", comp, "cat:", cat, "\n")
+    cat("DEBUG - geneList length:", length(geneList), "\n")
+    cat("DEBUG - geneList range:", range(geneList), "\n")
+    cat("DEBUG - term2gene nrow:", nrow(term2gene), "\n")
+
+    gsea_obj <- GSEA(geneList, TERM2GENE = term2gene,
+      minGSSize = 10, maxGSSize = 1000,
+      pvalueCutoff = 0.05)
+
+    # DEBUG: Print GSEA results info
+    cat("DEBUG - gsea_obj@result nrow:", nrow(gsea_obj@result), "\n")
+    if (nrow(gsea_obj@result) > 0) {
+      cat("DEBUG - p.adjust range:", range(gsea_obj@result$p.adjust), "\n")
+    }
+
+    gsea_results[[comp]][[cat]] <- gsea_obj
+
+    if (nrow(gsea_obj@result) == 0) {
+      message("No enriched terms for ", comp, " with category ", cat, ", skipping dotplot.")
+      next
+    }
+
+    gsea_res_filt <- gsea_obj@result %>% dplyr::filter(setSize > 10)
+
+    if (nrow(gsea_res_filt) == 0) {
+      message("No enriched terms with gene count > 10 for ", comp, " with category ", cat, ", skipping dotplot.")
+      next
+    }
+
+    gsea_res_filt_top <- gsea_res_filt %>% head(15)
+    pvals <- gsea_res_filt_top$p.adjust
+    print(comp)
+    print(cat)
+    print(length(pvals))
+
+    dp.tmp <- ggplot(gsea_res_filt_top, aes(x = NES, y = reorder(Description, NES))) +
+      geom_point(aes(size = setSize, color = p.adjust)) +
+      scale_color_gradient(
+        low = "red", high = "blue",
+        name = "Adj. p-value",
+        guide = guide_colorbar(reverse = TRUE)
+      ) +
+      labs(
+        title = paste0(comparison_titles[comp], " (", category_titles[cat], ")"),
+        x = "Normalized Enrichment Score (NES)",
+        y = "Gene Set",
+        size = "Gene Count"
+      ) +
+      theme_minimal(base_size = fontSize)
+
+    savePlot(
+      plot = dp.tmp,
+      plotDir = plotDir,
+      filename = paste0(comp, "_GSEA_dotplot_", cat),
+      height = 9,
+      width = 9,
+      units = "in",
+      dpi = 600,
+      formats = c("pdf", "png")
+    )
+  }
+}
+```
+
+```{r Figure2CNareshStyleEnrichmentPlotHallmark}
+comparisons <- list()
+comparisons[["results_Treg_IARVMicrobial"]] <- results_Treg_IARVMicrobial
+comparisons[["results_Tconv_IARVMicrobial"]] <- results_Tconv_IARVMicrobial
+
+# Mapping for comparisons
+comparison_titles <- c(
+  "results_Treg_IARVMicrobial" = "Treg: IAR - Microbial",
+  "results_Tconv_IARVMicrobial" = "Tconv: IAR - Microbial"
+)
+
+create_hallmark_gsea_comparison <- function(comparisons) {
+  # Get Hallmark gene sets
+  hs_sets <- msigdbr(species = "Homo sapiens", category = "H") %>%
+    dplyr::select(gs_name, gene_symbol)
+
+  # 1. SINGLE COMPREHENSIVE GSEA RUN: Get all pathways with correct multiple-testing adjustment
+
+  # Get gene lists for each cell type
+  treg_df <- comparisons[["results_Treg_IARVMicrobial"]]
+  treg_df <- treg_df %>% dplyr::filter(adj.P.Val <= 0.1)
+  treg_geneList <- treg_df$logFC
+  names(treg_geneList) <- treg_df$gene
+  treg_geneList <- sort(treg_geneList, decreasing = TRUE)
+
+  tconv_df <- comparisons[["results_Tconv_IARVMicrobial"]]
+  tconv_df <- tconv_df %>% dplyr::filter(adj.P.Val <= 0.1)
+  tconv_geneList <- tconv_df$logFC
+  names(tconv_geneList) <- tconv_df$gene
+  tconv_geneList <- sort(tconv_geneList, decreasing = TRUE)
+
+  # Run GSEA ONCE with p-value=1.0 to get ALL pathways with properly adjusted p-values
+  treg_gsea <- GSEA(treg_geneList,
+    TERM2GENE = hs_sets,
+    minGSSize = 10,
+    maxGSSize = 1000,
+    pvalueCutoff = 1.0)  # Get ALL pathways
+
+  tconv_gsea <- GSEA(tconv_geneList,
+    TERM2GENE = hs_sets,
+    minGSSize = 10,
+    maxGSSize = 1000,
+    pvalueCutoff = 1.0)  # Get ALL pathways
+
+  # 2. SELECT TERMS using the properly adjusted p-values from the comprehensive analysis
+
+  # Find significantly enriched terms (p.adjust < 0.05) in each cell type
+  treg_significant <- treg_gsea@result %>%
+    dplyr::filter(p.adjust < 0.05) %>%
+    dplyr::arrange(p.adjust)
+
+  tconv_significant <- tconv_gsea@result %>%
+    dplyr::filter(p.adjust < 0.05) %>%
+    dplyr::arrange(p.adjust)
+
+  # Print counts of significant terms for debugging
+  cat("Significant HALLMARK pathways in Treg:", nrow(treg_significant), "\n")
+  cat("Significant HALLMARK pathways in Tconv:", nrow(tconv_significant), "\n")
+
+  # Get top 3 from Treg (or all if fewer)
+  treg_top <- treg_significant %>%
+    dplyr::slice(1:min(10, nrow(.)))
+
+  # Get top 7 from Tconv that don't overlap with Treg
+  tconv_nonoverlap <- tconv_significant %>%
+    dplyr::filter(!(ID %in% treg_top$ID)) %>%
+    dplyr::slice(1:min(10, nrow(.)))
+
+  # List of terms to display
+  display_terms <- c(treg_top$ID, tconv_nonoverlap$ID)
+
+  # Print for debugging
+  cat("Selected", length(treg_top$ID), "terms from Treg and",
+    length(tconv_nonoverlap$ID), "terms from Tconv\n")
+
+  # 3. PREPARE DATA: Extract selected terms from each cell type's results
+
+  # Get results for these terms from Treg data
+  treg_results <- treg_gsea@result %>%
+    dplyr::filter(ID %in% display_terms) %>%
+    dplyr::mutate(CellType = "Treg",
+      # Mark if this term is significant in THIS cell type
+      is_significant = ID %in% treg_significant$ID,
+      # Also mark if this is one of the selected top terms for THIS cell type
+      is_selected_top = ID %in% treg_top$ID)
+
+  # Get results for these terms from Tconv data
+  tconv_results <- tconv_gsea@result %>%
+    dplyr::filter(ID %in% display_terms) %>%
+    dplyr::mutate(CellType = "Tconv",
+      # Mark if this term is significant in THIS cell type
+      is_significant = ID %in% tconv_significant$ID,
+      # Also mark if this is one of the selected top terms for THIS cell type
+      is_selected_top = ID %in% tconv_nonoverlap$ID)
+
+  # Handle any missing terms by adding with placeholder values
+  missing_in_treg <- setdiff(display_terms, treg_results$ID)
+  missing_in_tconv <- setdiff(display_terms, tconv_results$ID)
+
+  if (length(missing_in_treg) > 0) {
+    for (term in missing_in_treg) {
+      term_desc <- tconv_results$Description[tconv_results$ID == term]
+      if (length(term_desc) > 0) {
+        treg_results <- rbind(treg_results,
+          data.frame(ID = term,
+            Description = term_desc[1],
+            setSize = NA,
+            enrichmentScore = 0,
+            NES = 0,
+            pvalue = 1,
+            p.adjust = 1,
+            qvalue = 1,
+            rank = NA,
+            leading_edge = NA,
+            core_enrichment = NA,
+            CellType = "Treg",
+            is_significant = FALSE,
+            is_selected_top = FALSE))
+      }
+    }
+  }
+
+  if (length(missing_in_tconv) > 0) {
+    for (term in missing_in_tconv) {
+      term_desc <- treg_results$Description[treg_results$ID == term]
+      if (length(term_desc) > 0) {
+        tconv_results <- rbind(tconv_results,
+          data.frame(ID = term,
+            Description = term_desc[1],
+            setSize = NA,
+            enrichmentScore = 0,
+            NES = 0,
+            pvalue = 1,
+            p.adjust = 1,
+            qvalue = 1,
+            rank = NA,
+            leading_edge = NA,
+            core_enrichment = NA,
+            CellType = "Tconv",
+            is_significant = FALSE,
+            is_selected_top = FALSE))
+      }
+    }
+  }
+
+  # 4. COMBINE AND FORMAT: Merge results for plotting
+
+  # Combine the results
+  combined_results <- rbind(treg_results, tconv_results)
+
+  # Clean up pathway names
+  combined_results$Description <- gsub("HALLMARK_", "", combined_results$Description)
+
+  # Sort pathways by average NES magnitude
+  description_order <- combined_results %>%
+    dplyr::group_by(Description) %>%
+    dplyr::summarize(mean_abs_NES = mean(abs(NES), na.rm = TRUE)) %>%
+    dplyr::arrange(desc(mean_abs_NES)) %>%
+    dplyr::pull(Description)
+
+  combined_results$Description <- factor(combined_results$Description,
+    levels = description_order)
+
+  # 5. CREATE PLOT: Using selected top terms for coloring
+  p <- ggplot(combined_results, aes(x = NES, y = Description)) +
+    geom_vline(xintercept = 0, linetype = "solid", color = "gray80") +
+    geom_segment(aes(y = Description, yend = Description, x = 0, xend = NES),
+      color = "black", linewidth = 0.5) +
+    geom_point(aes(
+      # Size based on -log10(p.adjust)
+      size = -log10(p.adjust),
+      # Only color the originally selected top terms as significant
+      fill = ifelse(is_selected_top, "Significant", "Not Significant")
+    ),
+    shape = 21,
+    color = "black",
+    stroke = 0.5) +
+    facet_wrap(~CellType, nrow = 1) +
+    scale_fill_manual(
+      values = c("Significant" = "red", "Not Significant" = "lightblue"),
+      name = "Significance"
+    ) +
+    labs(
+      x = "Normalized Enrichment Score (NES)",
+      y = "",
+      size = "-log10(Adj.P)",
+      title = "Hallmark Gene Sets: IAR vs Microbial"
+    ) +
+    theme_bw() +
+    theme(
+      strip.background = element_rect(fill = "white"),
+      strip.text = element_text(face = "bold", size = 14),
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+      axis.text.y = element_text(size = 14),
+      axis.text.x = element_text(size = 14),
+      axis.title.x = element_text(size = 14),
+      axis.title.y = element_text(size = 14),
+      legend.position = "right",
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_line(color = "gray95"),
+      panel.grid.major.y = element_blank()
+    )
+
+  # Return the plot and data
+  return(list(plot = p, data = combined_results))
+}
+
+# Run the function and save the plot
+result <- create_hallmark_gsea_comparison(comparisons)
+
+# Save the plot
+savePlot(
+  plot = result$plot,
+  plotDir = plotDir,
+  filename = "Hallmark_GSEA_Comparison_TregTconv",
+  height = 8,
+  width = 12,
+  units = "in",
+  dpi = 600,
+  formats = c("pdf", "png")
+)
+
+# Save the data for reference
+# write.csv(result$data, file = file.path(dataOutputDir, "Hallmark_GSEA_Comparison_Data.csv"),
+#           row.names = FALSE)
+```
+
+```{r Figure2DNareshStyleEnrichmentPlotGO}
+comparisons <- list()
+comparisons[["results_Treg_IARVMicrobial"]] <- results_Treg_IARVMicrobial
+comparisons[["results_Tconv_IARVMicrobial"]] <- results_Tconv_IARVMicrobial
+
+# Mapping for comparisons
+comparison_titles <- c(
+  "results_Treg_IARVMicrobial" = "Treg: IAR - Microbial",
+  "results_Tconv_IARVMicrobial" = "Tconv: IAR - Microbial"
+)
+
+create_GO_gsea_comparison <- function(comparisons) {
+  # Get Hallmark gene sets
+  GO_sets <- msigdbr(species = "Homo sapiens", category = "C5") %>%
+    dplyr::select(gs_name, gene_symbol)
+
+  # 1. SINGLE COMPREHENSIVE GSEA RUN: Get all pathways with correct multiple-testing adjustment
+
+  # Get gene lists for each cell type
+  treg_df <- comparisons[["results_Treg_IARVMicrobial"]]
+  treg_df <- treg_df %>% dplyr::filter(adj.P.Val <= 0.05)
+  treg_geneList <- treg_df$logFC
+  names(treg_geneList) <- treg_df$gene
+  treg_geneList <- sort(treg_geneList, decreasing = TRUE)
+
+  tconv_df <- comparisons[["results_Tconv_IARVMicrobial"]]
+  tconv_df <- tconv_df %>% dplyr::filter(adj.P.Val <= 0.05)
+  tconv_geneList <- tconv_df$logFC
+  names(tconv_geneList) <- tconv_df$gene
+  tconv_geneList <- sort(tconv_geneList, decreasing = TRUE)
+
+  # Run GSEA ONCE with p-value=1.0 to get ALL pathways with properly adjusted p-values
+  treg_gsea <- GSEA(treg_geneList,
+    TERM2GENE = GO_sets,
+    minGSSize = 10,
+    maxGSSize = 1000,
+    pvalueCutoff = 1.0)  # Get ALL pathways
+
+  tconv_gsea <- GSEA(tconv_geneList,
+    TERM2GENE = GO_sets,
+    minGSSize = 10,
+    maxGSSize = 1000,
+    pvalueCutoff = 1.0)  # Get ALL pathways
+
+  # 2. SELECT TERMS using the properly adjusted p-values from the comprehensive analysis
+
+  # Find significantly enriched terms (p.adjust < 0.05) in each cell type
+  treg_significant <- treg_gsea@result %>%
+    dplyr::filter(p.adjust < 0.05) %>%
+    dplyr::arrange(p.adjust)
+
+  tconv_significant <- tconv_gsea@result %>%
+    dplyr::filter(p.adjust < 0.05) %>%
+    dplyr::arrange(p.adjust)
+
+  # Print counts of significant terms for debugging
+  cat("Significant HALLMARK pathways in Treg:", nrow(treg_significant), "\n")
+  cat("Significant HALLMARK pathways in Tconv:", nrow(tconv_significant), "\n")
+
+  # Get top 8 from Treg (or all if fewer)
+  treg_top <- treg_significant %>%
+    dplyr::slice(1:min(8, nrow(.)))
+
+  # Get top 8 from Tconv that don't overlap with Treg
+  tconv_nonoverlap <- tconv_significant %>%
+    dplyr::filter(!(ID %in% treg_top$ID)) %>%
+    dplyr::slice(1:min(8, nrow(.)))
+
+  # List of terms to display
+  display_terms <- c(treg_top$ID, tconv_nonoverlap$ID)
+
+  # Print for debugging
+  cat("Selected", length(treg_top$ID), "terms from Treg and",
+    length(tconv_nonoverlap$ID), "terms from Tconv\n")
+
+  # 3. PREPARE DATA: Extract selected terms from each cell type's results
+
+  # Get results for these terms from Treg data
+  treg_results <- treg_gsea@result %>%
+    dplyr::filter(ID %in% display_terms) %>%
+    dplyr::mutate(CellType = "Treg",
+      # Mark if this term is significant in THIS cell type
+      is_significant = ID %in% treg_significant$ID,
+      # Also mark if this is one of the selected top terms for THIS cell type
+      is_selected_top = ID %in% treg_top$ID)
+
+  # Get results for these terms from Tconv data
+  tconv_results <- tconv_gsea@result %>%
+    dplyr::filter(ID %in% display_terms) %>%
+    dplyr::mutate(CellType = "Tconv",
+      # Mark if this term is significant in THIS cell type
+      is_significant = ID %in% tconv_significant$ID,
+      # Also mark if this is one of the selected top terms for THIS cell type
+      is_selected_top = ID %in% tconv_nonoverlap$ID)
+
+  # Handle any missing terms by adding with placeholder values
+  missing_in_treg <- setdiff(display_terms, treg_results$ID)
+  missing_in_tconv <- setdiff(display_terms, tconv_results$ID)
+
+  if (length(missing_in_treg) > 0) {
+    for (term in missing_in_treg) {
+      term_desc <- tconv_results$Description[tconv_results$ID == term]
+      if (length(term_desc) > 0) {
+        treg_results <- rbind(treg_results,
+          data.frame(ID = term,
+            Description = term_desc[1],
+            setSize = NA,
+            enrichmentScore = 0,
+            NES = 0,
+            pvalue = 1,
+            p.adjust = 1,
+            qvalue = 1,
+            rank = NA,
+            leading_edge = NA,
+            core_enrichment = NA,
+            CellType = "Treg",
+            is_significant = FALSE,
+            is_selected_top = FALSE))
+      }
+    }
+  }
+
+  if (length(missing_in_tconv) > 0) {
+    for (term in missing_in_tconv) {
+      term_desc <- treg_results$Description[treg_results$ID == term]
+      if (length(term_desc) > 0) {
+        tconv_results <- rbind(tconv_results,
+          data.frame(ID = term,
+            Description = term_desc[1],
+            setSize = NA,
+            enrichmentScore = 0,
+            NES = 0,
+            pvalue = 1,
+            p.adjust = 1,
+            qvalue = 1,
+            rank = NA,
+            leading_edge = NA,
+            core_enrichment = NA,
+            CellType = "Tconv",
+            is_significant = FALSE,
+            is_selected_top = FALSE))
+      }
+    }
+  }
+
+  # 4. COMBINE AND FORMAT: Merge results for plotting
+
+  # Combine the results
+  combined_results <- rbind(treg_results, tconv_results)
+
+  # Clean up pathway names
+  combined_results$Description <- gsub("GOCC_", "", combined_results$Description)
+  combined_results$Description <- gsub("GOBP_", "", combined_results$Description)
+  combined_results$Description <- gsub("GOMF_", "", combined_results$Description)
+
+  # Sort pathways by average NES magnitude
+  description_order <- combined_results %>%
+    dplyr::group_by(Description) %>%
+    dplyr::summarize(mean_abs_NES = mean(abs(NES), na.rm = TRUE)) %>%
+    dplyr::arrange(desc(mean_abs_NES)) %>%
+    dplyr::pull(Description)
+
+  combined_results$Description <- factor(combined_results$Description,
+    levels = description_order)
+
+  # 5. CREATE PLOT: Using selected top terms for coloring
+  p <- ggplot(combined_results, aes(x = NES, y = Description)) +
+    geom_vline(xintercept = 0, linetype = "solid", color = "gray80") +
+    geom_segment(aes(y = Description, yend = Description, x = 0, xend = NES),
+      color = "black", linewidth = 0.5) +
+    geom_point(aes(
+      # Size based on -log10(p.adjust)
+      size = -log10(p.adjust),
+      # Only color the originally selected top terms as significant
+      fill = ifelse(is_selected_top, "Significant", "Not Significant")
+    ),
+    shape = 21,
+    color = "black",
+    stroke = 0.5) +
+    facet_wrap(~CellType, nrow = 1) +
+    scale_fill_manual(
+      values = c("Significant" = "red", "Not Significant" = "lightblue"),
+      name = "Significance"
+    ) +
+    labs(
+      x = "Normalized Enrichment Score (NES)",
+      y = "",
+      size = "-log10(Adj.P)",
+      title = "GO Gene Sets: IAR vs Microbial"
+    ) +
+    theme_bw() +
+    theme(
+      strip.background = element_rect(fill = "white"),
+      strip.text = element_text(face = "bold", size = 14),
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+      axis.text.y = element_text(size = 14),
+      axis.text.x = element_text(size = 14),
+      axis.title.x = element_text(size = 14),
+      axis.title.y = element_text(size = 14),
+      legend.position = "right",
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_line(color = "gray95"),
+      panel.grid.major.y = element_blank()
+    )
+
+  # Return the plot and data
+  return(list(plot = p, data = combined_results))
+}
+
+# Run the function and save the plot
+result <- create_GO_gsea_comparison(comparisons)
+
+# Save the plot
+savePlot(
+  plot = result$plot,
+  plotDir = plotDir,
+  filename = "Hallmark_GO_Comparison_TregTconv",
+  height = 8,
+  width = 12,
+  units = "in",
+  dpi = 600,
+  formats = c("pdf", "png")
+)
+
+# Save the data for reference
+# write.csv(result$data, file = file.path(dataOutputDir, "GO_GSEA_Comparison_Data.csv"),
+#           row.names = FALSE)
+```
+
+```{r Figure2ECombinedTregHallmarkGO}
+nTerms <- 15 # number of terms to include in the plots
+
+comparisons <- list()
+comparisons[["results_Treg_IARVMicrobial"]] <- results_Treg_IARVMicrobial
+# comparisons[["results_Tconv_IARVMicrobial"]] <- results_Tconv_IARVMicrobial
+
+# Combined Treg figure with Hallmark on left and GO on right
+create_combined_treg_gsea <- function(comparisons) {
+  # Get gene sets
+  hs_sets <- msigdbr(species = "Homo sapiens", category = "H") %>%
+    dplyr::select(gs_name, gene_symbol)
+
+  GO_sets <- msigdbr(species = "Homo sapiens", category = "C5") %>%
+    dplyr::select(gs_name, gene_symbol)
+
+  # Get Treg gene list
+  treg_df <- comparisons[["results_Treg_IARVMicrobial"]]
+  treg_df <- treg_df %>% dplyr::filter(adj.P.Val <= 0.1)
+  treg_geneList <- treg_df$logFC
+  names(treg_geneList) <- treg_df$gene
+  treg_geneList <- sort(treg_geneList, decreasing = TRUE)
+
+  # Run GSEA for both gene sets
+  treg_hallmark_gsea <- GSEA(treg_geneList,
+    TERM2GENE = hs_sets,
+    minGSSize = 10,
+    maxGSSize = 1000,
+    pvalueCutoff = 1)  # Get ALL pathways with proper FDR correction
+
+  treg_go_gsea <- GSEA(treg_geneList,
+    TERM2GENE = GO_sets,
+    minGSSize = 10,
+    maxGSSize = 1000,
+    pvalueCutoff = 1)  # Get ALL pathways with proper FDR correction
+
+  # Export GSEA results to Excel
+  gsea_data_list <- list(
+    "Treg_Hallmark" = treg_hallmark_gsea@result,
+    "Treg_GO" = treg_go_gsea@result
+  )
+
+  output_filename <- file.path(dataOutputDir, paste0(filenameSuffix, "GSEA_results_Treg_IARVMicrobial.xlsx"))
+  write.xlsx(gsea_data_list, file = output_filename, overwrite = TRUE)
+  cat("GSEA results exported to:", output_filename, "\n")
+
+  # Select significant terms
+  hallmark_significant <- treg_hallmark_gsea@result %>%
+    dplyr::filter(p.adjust < 0.05) %>%
+    dplyr::arrange(p.adjust) %>%
+    dplyr::slice(1:min(nTerms, nrow(.)))
+
+  go_significant <- treg_go_gsea@result %>%
+    dplyr::filter(p.adjust < 0.05) %>%
+    dplyr::arrange(p.adjust) %>%
+    dplyr::slice(1:min(nTerms, nrow(.)))
+
+  # Print debugging info
+  cat("Treg Hallmark significant terms (p.adjust < 0.05):", nrow(hallmark_significant), "\n")
+  cat("Treg GO significant terms (p.adjust < 0.05):", nrow(go_significant), "\n")
+
+  # Check if we have any significant terms at all
+  if (nrow(hallmark_significant) == 0 && nrow(go_significant) == 0) {
+    cat("No significant terms found for Treg. Returning empty plot.\n")
+    empty_plot <- ggplot() +
+      geom_text(aes(x = 0, y = 0, label = "No significant terms found"), size = 6) +
+      theme_void() +
+      ggtitle("Treg: No Significant Terms (IAR vs Microbial)")
+    return(list(plot = empty_plot, data = data.frame()))
+  }
+
+  # Prepare Hallmark data
+  hallmark_data <- hallmark_significant %>%
+    dplyr::mutate(
+      GeneSet = "Hallmark",
+      Description_clean = gsub("HALLMARK_", "", Description)
+    )
+
+  # Prepare GO data
+  go_data <- go_significant %>%
+    dplyr::mutate(
+      GeneSet = "GO",
+      Description_clean = gsub("GOCC_|GOBP_|GOMF_", "", Description)
+    )
+
+  # Combine data
+  combined_data <- rbind(
+    hallmark_data %>% dplyr::select(ID, Description_clean, NES, p.adjust, GeneSet),
+    go_data %>% dplyr::select(ID, Description_clean, NES, p.adjust, GeneSet)
+  )
+
+  # Order terms by NES magnitude within each gene set
+  hallmark_order <- hallmark_data %>%
+    dplyr::arrange(desc(abs(NES))) %>%
+    dplyr::pull(Description_clean)
+
+  go_order <- go_data %>%
+    dplyr::arrange(desc(abs(NES))) %>%
+    dplyr::pull(Description_clean)
+
+  combined_data$Description_clean <- factor(combined_data$Description_clean,
+    levels = c(hallmark_order, go_order))
+
+  # Create the plot
+  p <- ggplot(combined_data, aes(x = NES, y = Description_clean)) +
+    geom_vline(xintercept = 0, linetype = "solid", color = "gray80") +
+    geom_segment(aes(y = Description_clean, yend = Description_clean, x = 0, xend = NES),
+      color = "black", linewidth = 0.5) +
+    geom_point(aes(
+      size = -log10(p.adjust),
+      fill = -log10(p.adjust)
+    ),
+    shape = 21,
+    color = "black",
+    stroke = 0.5) +
+    facet_wrap(~GeneSet, scales = "free_y", nrow = 1) +
+    scale_fill_gradient(
+      low = "lightblue", high = "red",
+      name = "-log10(Adj.P)"
+    ) +
+    labs(
+      x = "Normalized Enrichment Score (NES)",
+      y = "",
+      size = "-log10(Adj.P)",
+      title = "Treg: Hallmark and GO Gene Sets (IAR vs Microbial)"
+    ) +
+    theme_bw() +
+    theme(
+      strip.background = element_rect(fill = "white", color = "black", linewidth = 1),
+      strip.text = element_text(face = "bold", size = 14),
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+      axis.text.y = element_text(size = 12),
+      axis.text.x = element_text(size = 12),
+      axis.title.x = element_text(size = 14),
+      axis.title.y = element_text(size = 14),
+      legend.position = "right",
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_line(color = "gray95"),
+      panel.grid.major.y = element_blank(),
+      panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+    ) +
+    ggh4x::facetted_pos_scales(
+      y = list(
+        scale_y_discrete(position = "left"),   # GO on left
+        scale_y_discrete(position = "right")   # Hallmark on right
+      )
+    )
+
+  return(list(plot = p, data = combined_data))
+}
+
+# Run the function and save the plot
+treg_result <- create_combined_treg_gsea(comparisons)
+
+# Save the plot
+savePlot(
+  plot = treg_result$plot,
+  plotDir = plotDir,
+  filename = "Combined_Treg_Hallmark_GO_GSEA",
+  height = 8,
+  width = 18,
+  units = "in",
+  dpi = 600,
+  formats = c("pdf", "png")
+)
+```
+
+```{r Figure2FCombinedTconvHallmarkGO}
+nTerms <- 15 # number of terms to include in the plots
+
+comparisons <- list()
+# comparisons[["results_Treg_IARVMicrobial"]] <- results_Treg_IARVMicrobial
+comparisons[["results_Tconv_IARVMicrobial"]] <- results_Tconv_IARVMicrobial
+
+# Combined Tconv figure with Hallmark on left and GO on right
+create_combined_tconv_gsea <- function(comparisons) {
+  # Get gene sets
+  hs_sets <- msigdbr(species = "Homo sapiens", category = "H") %>%
+    dplyr::select(gs_name, gene_symbol)
+
+  GO_sets <- msigdbr(species = "Homo sapiens", category = "C5") %>%
+    dplyr::select(gs_name, gene_symbol)
+
+  # Get Tconv gene list
+  tconv_df <- comparisons[["results_Tconv_IARVMicrobial"]]
+  tconv_df <- tconv_df %>% dplyr::filter(adj.P.Val <= 0.1)
+  tconv_geneList <- tconv_df$logFC
+  names(tconv_geneList) <- tconv_df$gene
+  tconv_geneList <- sort(tconv_geneList, decreasing = TRUE)
+
+  # Run GSEA for both gene sets
+  tconv_hallmark_gsea <- GSEA(tconv_geneList,
+    TERM2GENE = hs_sets,
+    minGSSize = 10,
+    maxGSSize = 1000,
+    pvalueCutoff = 1)  # Get ALL pathways with proper FDR correction
+
+  tconv_go_gsea <- GSEA(tconv_geneList,
+    TERM2GENE = GO_sets,
+    minGSSize = 10,
+    maxGSSize = 1000,
+    pvalueCutoff = 1)  # Get ALL pathways with proper FDR correction
+
+  # Export GSEA results to Excel
+  gsea_data_list <- list(
+    "Tconv_Hallmark" = tconv_hallmark_gsea@result,
+    "Tconv_GO" = tconv_go_gsea@result
+  )
+
+  output_filename <- file.path(dataOutputDir, paste0(filenameSuffix, "GSEA_results_Tconv_IARVMicrobial.xlsx"))
+  write.xlsx(gsea_data_list, file = output_filename, overwrite = TRUE)
+  cat("GSEA results exported to:", output_filename, "\n")
+
+  # Select significant terms
+  hallmark_significant <- tconv_hallmark_gsea@result %>%
+    dplyr::filter(p.adjust < 0.05) %>%
+    dplyr::arrange(p.adjust) %>%
+    dplyr::slice(1:min(nTerms, nrow(.)))
+
+  go_significant <- tconv_go_gsea@result %>%
+    dplyr::filter(p.adjust < 0.05) %>%
+    dplyr::arrange(p.adjust) %>%
+    dplyr::slice(1:min(nTerms, nrow(.)))
+
+  # Print debugging info
+  cat("Tconv Hallmark significant terms (p.adjust < 0.05):", nrow(hallmark_significant), "\n")
+  cat("Tconv GO significant terms (p.adjust < 0.05):", nrow(go_significant), "\n")
+
+  # Check if we have any significant terms at all
+  if (nrow(hallmark_significant) == 0 && nrow(go_significant) == 0) {
+    cat("No significant terms found for Tconv. Returning empty plot.\n")
+    empty_plot <- ggplot() +
+      geom_text(aes(x = 0, y = 0, label = "No significant terms found"), size = 6) +
+      theme_void() +
+      ggtitle("Tconv: No Significant Terms (IAR vs Microbial)")
+    return(list(plot = empty_plot, data = data.frame()))
+  }
+
+  # Prepare Hallmark data
+  hallmark_data <- hallmark_significant %>%
+    dplyr::mutate(
+      GeneSet = "Hallmark",
+      Description_clean = gsub("HALLMARK_", "", Description)
+    )
+
+  # Prepare GO data
+  go_data <- go_significant %>%
+    dplyr::mutate(
+      GeneSet = "GO",
+      Description_clean = gsub("GOCC_|GOBP_|GOMF_", "", Description)
+    )
+
+  # Combine data
+  combined_data <- rbind(
+    hallmark_data %>% dplyr::select(ID, Description_clean, NES, p.adjust, GeneSet),
+    go_data %>% dplyr::select(ID, Description_clean, NES, p.adjust, GeneSet)
+  )
+
+  # Order terms by NES magnitude within each gene set
+  hallmark_order <- hallmark_data %>%
+    dplyr::arrange(desc(abs(NES))) %>%
+    dplyr::pull(Description_clean)
+
+  go_order <- go_data %>%
+    dplyr::arrange(desc(abs(NES))) %>%
+    dplyr::pull(Description_clean)
+
+  combined_data$Description_clean <- factor(combined_data$Description_clean,
+    levels = c(hallmark_order, go_order))
+
+  # Create the plot
+  p <- ggplot(combined_data, aes(x = NES, y = Description_clean)) +
+    geom_vline(xintercept = 0, linetype = "solid", color = "gray80") +
+    geom_segment(aes(y = Description_clean, yend = Description_clean, x = 0, xend = NES),
+      color = "black", linewidth = 0.5) +
+    geom_point(aes(
+      size = -log10(p.adjust),
+      fill = -log10(p.adjust)
+    ),
+    shape = 21,
+    color = "black",
+    stroke = 0.5) +
+    facet_wrap(~GeneSet, scales = "free_y", nrow = 1) +
+    scale_fill_gradient(
+      low = "lightblue", high = "red",
+      name = "-log10(Adj.P)"
+    ) +
+    labs(
+      x = "Normalized Enrichment Score (NES)",
+      y = "",
+      size = "-log10(Adj.P)",
+      title = "Tconv: Hallmark and GO Gene Sets (IAR vs Microbial)"
+    ) +
+    theme_bw() +
+    theme(
+      strip.background = element_rect(fill = "white", color = "black", linewidth = 1),
+      strip.text = element_text(face = "bold", size = 14),
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+      axis.text.y = element_text(size = 12),
+      axis.text.x = element_text(size = 12),
+      axis.title.x = element_text(size = 14),
+      axis.title.y = element_text(size = 14),
+      legend.position = "right",
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_line(color = "gray95"),
+      panel.grid.major.y = element_blank(),
+      panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+    ) +
+    ggh4x::facetted_pos_scales(
+      y = list(
+        scale_y_discrete(position = "left"),   # GO on left
+        scale_y_discrete(position = "right")   # Hallmark on right
+      )
+    )
+
+  return(list(plot = p, data = combined_data))
+}
+
+# Run the function and save the plot
+tconv_result <- create_combined_tconv_gsea(comparisons)
+
+# Save the plot
+savePlot(
+  plot = tconv_result$plot,
+  plotDir = plotDir,
+  filename = "Combined_Tconv_Hallmark_GO_GSEA",
+  height = 8,
+  width = 18,
+  units = "in",
+  dpi = 600,
+  formats = c("pdf", "png")
+)
+```
+
+```{r Figure2EStackedTregHallmarkGO}
+nTerms <- 15 # number of terms to include in the plots
+
+comparisons <- list()
+comparisons[["results_Treg_IARVMicrobial"]] <- results_Treg_IARVMicrobial
+
+# Combined Treg figure with Hallmark on top and GO on bottom (stacked)
+create_stacked_treg_gsea <- function(comparisons) {
+  # Get gene sets
+  hs_sets <- msigdbr(species = "Homo sapiens", category = "H") %>%
+    dplyr::select(gs_name, gene_symbol)
+
+  GO_sets <- msigdbr(species = "Homo sapiens", category = "C5") %>%
+    dplyr::select(gs_name, gene_symbol)
+
+  # Get Treg gene list
+  treg_df <- comparisons[["results_Treg_IARVMicrobial"]]
+  treg_df <- treg_df %>% dplyr::filter(adj.P.Val <= 0.1)
+  treg_geneList <- treg_df$logFC
+  names(treg_geneList) <- treg_df$gene
+  treg_geneList <- sort(treg_geneList, decreasing = TRUE)
+
+  # Run GSEA for both gene sets
+  treg_hallmark_gsea <- GSEA(treg_geneList,
+    TERM2GENE = hs_sets,
+    minGSSize = 10,
+    maxGSSize = 1000,
+    pvalueCutoff = 1.0)
+
+  treg_go_gsea <- GSEA(treg_geneList,
+    TERM2GENE = GO_sets,
+    minGSSize = 10,
+    maxGSSize = 1000,
+    pvalueCutoff = 1.0)
+
+  # Select significant terms
+  hallmark_significant <- treg_hallmark_gsea@result %>%
+    dplyr::filter(p.adjust < 0.05) %>%
+    dplyr::arrange(p.adjust) %>%
+    dplyr::slice(1:min(nTerms, nrow(.)))
+
+  go_significant <- treg_go_gsea@result %>%
+    dplyr::filter(p.adjust < 0.05) %>%
+    dplyr::arrange(p.adjust) %>%
+    dplyr::slice(1:min(nTerms, nrow(.)))
+
+  # Check if we have any significant terms at all
+  if (nrow(hallmark_significant) == 0 && nrow(go_significant) == 0) {
+    cat("No significant terms found for Treg. Returning empty plot.\n")
+    empty_plot <- ggplot() +
+      geom_text(aes(x = 0, y = 0, label = "No significant terms found"), size = 6) +
+      theme_void() +
+      ggtitle("Treg: No Significant Terms (IAR vs Microbial) - Stacked")
+    return(list(plot = empty_plot, data = data.frame()))
+  }
+
+  # Prepare Hallmark data
+  hallmark_data <- hallmark_significant %>%
+    dplyr::mutate(
+      GeneSet = "Hallmark",
+      Description_clean = gsub("HALLMARK_", "", Description)
+    )
+
+  # Prepare GO data
+  go_data <- go_significant %>%
+    dplyr::mutate(
+      GeneSet = "GO",
+      Description_clean = gsub("GOCC_|GOBP_|GOMF_", "", Description)
+    )
+
+  # Combine data
+  combined_data <- rbind(
+    hallmark_data %>% dplyr::select(ID, Description_clean, NES, p.adjust, GeneSet),
+    go_data %>% dplyr::select(ID, Description_clean, NES, p.adjust, GeneSet)
+  )
+
+  # Order terms by NES magnitude within each gene set
+  hallmark_order <- hallmark_data %>%
+    dplyr::arrange(desc(abs(NES))) %>%
+    dplyr::pull(Description_clean)
+
+  go_order <- go_data %>%
+    dplyr::arrange(desc(abs(NES))) %>%
+    dplyr::pull(Description_clean)
+
+  combined_data$Description_clean <- factor(combined_data$Description_clean,
+    levels = c(hallmark_order, go_order))
+
+  # Create the plot with proportional panel heights using facet_grid
+  p <- ggplot(combined_data, aes(x = NES, y = Description_clean)) +
+    geom_vline(xintercept = 0, linetype = "solid", color = "gray80") +
+    geom_segment(aes(y = Description_clean, yend = Description_clean, x = 0, xend = NES),
+      color = "black", linewidth = 0.5) +
+    geom_point(aes(
+      size = -log10(p.adjust),
+      fill = -log10(p.adjust)
+    ),
+    shape = 21,
+    color = "black",
+    stroke = 0.5) +
+    facet_grid(GeneSet ~ ., scales = "free_y", space = "free_y") +
+    scale_fill_gradient(
+      low = "lightblue", high = "red",
+      name = "-log10(Adj.P)"
+    ) +
+    labs(
+      x = "Normalized Enrichment Score (NES)",
+      y = "",
+      size = "-log10(Adj.P)",
+      title = "Treg: Hallmark and GO Gene Sets (IAR vs Microbial) - Stacked"
+    ) +
+    theme_bw() +
+    theme(
+      strip.background = element_rect(fill = "white", color = "black", linewidth = 1),
+      strip.text = element_text(face = "bold", size = 14),
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+      axis.text.y = element_text(size = 12),
+      axis.text.x = element_text(size = 12),
+      axis.title.x = element_text(size = 14),
+      axis.title.y = element_text(size = 14),
+      legend.position = "right",
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_line(color = "gray95"),
+      panel.grid.major.y = element_blank(),
+      panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+    )
+
+  return(list(plot = p, data = combined_data))
+}
+
+# Run the function and save the plot
+treg_stacked_result <- create_stacked_treg_gsea(comparisons)
+
+# Save the plot
+savePlot(
+  plot = treg_stacked_result$plot,
+  plotDir = plotDir,
+  filename = "Stacked_Treg_Hallmark_GO_GSEA",
+  height = 14,
+  width = 16,
+  units = "in",
+  dpi = 600,
+  formats = c("pdf", "png")
+)
+```
+
+
+## Stacked Tconv Plot
+```{r Figure2FStackedTconvHallmarkGO}
+nTerms <- 15 # number of terms to include in the plots
+
+comparisons <- list()
+comparisons[["results_Tconv_IARVMicrobial"]] <- results_Tconv_IARVMicrobial
+
+# Combined Tconv figure with Hallmark on top and GO on bottom (stacked)
+create_stacked_tconv_gsea <- function(comparisons) {
+  # Get gene sets
+  hs_sets <- msigdbr(species = "Homo sapiens", category = "H") %>%
+    dplyr::select(gs_name, gene_symbol)
+
+  GO_sets <- msigdbr(species = "Homo sapiens", category = "C5") %>%
+    dplyr::select(gs_name, gene_symbol)
+
+  # Get Tconv gene list
+  tconv_df <- comparisons[["results_Tconv_IARVMicrobial"]]
+  tconv_df <- tconv_df %>% dplyr::filter(adj.P.Val <= 0.1)
+  tconv_geneList <- tconv_df$logFC
+  names(tconv_geneList) <- tconv_df$gene
+  tconv_geneList <- sort(tconv_geneList, decreasing = TRUE)
+
+  # Run GSEA for both gene sets
+  tconv_hallmark_gsea <- GSEA(tconv_geneList,
+    TERM2GENE = hs_sets,
+    minGSSize = 10,
+    maxGSSize = 1000,
+    pvalueCutoff = 1.0)
+
+  tconv_go_gsea <- GSEA(tconv_geneList,
+    TERM2GENE = GO_sets,
+    minGSSize = 10,
+    maxGSSize = 1000,
+    pvalueCutoff = 1.0)
+
+  # Select significant terms
+  hallmark_significant <- tconv_hallmark_gsea@result %>%
+    dplyr::filter(p.adjust < 0.05) %>%
+    dplyr::arrange(p.adjust) %>%
+    dplyr::slice(1:min(nTerms, nrow(.)))
+
+  go_significant <- tconv_go_gsea@result %>%
+    dplyr::filter(p.adjust < 0.05) %>%
+    dplyr::arrange(p.adjust) %>%
+    dplyr::slice(1:min(nTerms, nrow(.)))
+
+  # Check if we have any significant terms at all
+  if (nrow(hallmark_significant) == 0 && nrow(go_significant) == 0) {
+    cat("No significant terms found for Tconv. Returning empty plot.\n")
+    empty_plot <- ggplot() +
+      geom_text(aes(x = 0, y = 0, label = "No significant terms found"), size = 6) +
+      theme_void() +
+      ggtitle("Tconv: No Significant Terms (IAR vs Microbial) - Stacked")
+    return(list(plot = empty_plot, data = data.frame()))
+  }
+
+  # Prepare Hallmark data
+  hallmark_data <- hallmark_significant %>%
+    dplyr::mutate(
+      GeneSet = "Hallmark",
+      Description_clean = gsub("HALLMARK_", "", Description)
+    )
+
+  # Prepare GO data
+  go_data <- go_significant %>%
+    dplyr::mutate(
+      GeneSet = "GO",
+      Description_clean = gsub("GOCC_|GOBP_|GOMF_", "", Description)
+    )
+
+  # Combine data
+  combined_data <- rbind(
+    hallmark_data %>% dplyr::select(ID, Description_clean, NES, p.adjust, GeneSet),
+    go_data %>% dplyr::select(ID, Description_clean, NES, p.adjust, GeneSet)
+  )
+
+  # Order terms by NES magnitude within each gene set
+  hallmark_order <- hallmark_data %>%
+    dplyr::arrange(desc(abs(NES))) %>%
+    dplyr::pull(Description_clean)
+
+  go_order <- go_data %>%
+    dplyr::arrange(desc(abs(NES))) %>%
+    dplyr::pull(Description_clean)
+
+  combined_data$Description_clean <- factor(combined_data$Description_clean,
+    levels = c(hallmark_order, go_order))
+
+  # Create the plot with proportional panel heights using facet_grid
+  p <- ggplot(combined_data, aes(x = NES, y = Description_clean)) +
+    geom_vline(xintercept = 0, linetype = "solid", color = "gray80") +
+    geom_segment(aes(y = Description_clean, yend = Description_clean, x = 0, xend = NES),
+      color = "black", linewidth = 0.5) +
+    geom_point(aes(
+      size = -log10(p.adjust),
+      fill = -log10(p.adjust)
+    ),
+    shape = 21,
+    color = "black",
+    stroke = 0.5) +
+    facet_grid(GeneSet ~ ., scales = "free_y", space = "free_y") +
+    scale_fill_gradient(
+      low = "lightblue", high = "red",
+      name = "-log10(Adj.P)"
+    ) +
+    labs(
+      x = "Normalized Enrichment Score (NES)",
+      y = "",
+      size = "-log10(Adj.P)",
+      title = "Tconv: Hallmark and GO Gene Sets (IAR vs Microbial) - Stacked"
+    ) +
+    theme_bw() +
+    theme(
+      strip.background = element_rect(fill = "white", color = "black", linewidth = 1),
+      strip.text = element_text(face = "bold", size = 14),
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 16),
+      axis.text.y = element_text(size = 12),
+      axis.text.x = element_text(size = 12),
+      axis.title.x = element_text(size = 14),
+      axis.title.y = element_text(size = 14),
+      legend.position = "right",
+      panel.grid.minor = element_blank(),
+      panel.grid.major.x = element_line(color = "gray95"),
+      panel.grid.major.y = element_blank(),
+      panel.border = element_rect(color = "black", fill = NA, linewidth = 1)
+    )
+
+  return(list(plot = p, data = combined_data))
+}
+
+# Run the function and save the plot
+tconv_stacked_result <- create_stacked_tconv_gsea(comparisons)
+
+# Save the plot
+savePlot(
+  plot = tconv_stacked_result$plot,
+  plotDir = plotDir,
+  filename = "Stacked_Tconv_Hallmark_GO_GSEA",
+  height = 14,
+  width = 16,
+  units = "in",
+  dpi = 600,
+  formats = c("pdf", "png")
+)
 ```

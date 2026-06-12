@@ -1,0 +1,10 @@
+{
+  // P589 is FROZEN on R 4.3.1 / Bioconductor 3.18 (renv).
+  // These workspace overrides pin the VSCode R extension to R 4.3 for this
+  // project only; all other projects use the global rig default (R 4.6).
+  // The wrappers set R_HOME to the 4.3 framework (see ~/.local/bin/*-4.3),
+  // because the framework's bin/R defers to "Current" (= the rig default).
+  "r.rterm.mac": "/Users/tedwards/.local/bin/radian-4.3",
+  "r.rpath.mac": "/Users/tedwards/.local/bin/R-4.3",
+  "r.bracketedPaste": true
+}

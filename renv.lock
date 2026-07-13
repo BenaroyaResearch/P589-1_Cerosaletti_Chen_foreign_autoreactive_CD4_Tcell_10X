@@ -4178,6 +4178,17 @@
       "Repository": "CRAN",
       "Hash": "a555924add98c99d2f411e37e7d25e9f"
     },
+    "presto": {
+      "Package": "presto",
+      "Version": "1.0.0",
+      "Source": "GitHub",
+      "RemoteType": "github",
+      "RemoteHost": "api.github.com",
+      "RemoteUsername": "immunogenomics",
+      "RemoteRepo": "presto",
+      "RemoteRef": "master",
+      "RemoteSha": "a24772a135c7895a8183b007376050556c60a05b"
+    },
     "prettyunits": {
       "Package": "prettyunits",
       "Version": "1.2.0",

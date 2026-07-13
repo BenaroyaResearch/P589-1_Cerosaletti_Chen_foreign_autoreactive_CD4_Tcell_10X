@@ -695,7 +695,7 @@ pairedDiffTest <- function(df, valueCol, groupCols) {
 
 ## Figure 1
 
-```{r Figure1B}
+```{r FigureS3C}
 # All-cells UMAP with RNA cluster labels
 set.seed(6022)
 plot.tmp <- DimPlot(object = seuratQCMergedCleaned,
@@ -720,7 +720,7 @@ savePlot(
 )
 ```
 
-```{r Figure1C}
+```{r TotalSeqGatingUMAP_REMOVED}
 # All-cells UMAP with TotalSeq gating cell type calling
 # set levels
 levels(seuratQCMergedCleaned@meta.data$cellTypeTotalSeq) <- c("Treg", "Tconv", "Other")
@@ -766,7 +766,7 @@ savePlot(
 )
 ```
 
-```{r Figure1D}
+```{r FigureS3D}
 # now just the TotalSeq gating calling
 nClust <- length(table(seuratQCMergedCleaned@meta.data$seurat_clusters_DS))
 nClustString <- paste0("_", as.character(nClust), "Clusters")
@@ -809,7 +809,7 @@ savePlot(
 rm_tmp(ask = FALSE)
 ```
 
-```{r Figure1E}
+```{r FigureS3F}
 # DGETregVsTconvHeatmapAllStims
 # Figure 1
 fontSize <- 8
@@ -943,7 +943,7 @@ rm_tmp(ask = FALSE)
 
 ## Figure S1
 
-```{r FigureS1B}
+```{r FigureS3B}
 # CITEseqMarkerScatterPlotsStimulationSplit_forGating_logNorm_noDownsample_densityPlot
 # Figure S1B
 # Set plot sizes
@@ -1105,7 +1105,7 @@ savePlot(
 )
 ```
 
-````{r FigureS1C}
+```{r TotalSeqExpressionUMAPs_REMOVED}
 # TotalSeq/CITESeq markers on UMAPs
 # Save the original default assay
 originalDefaultAssay.tmp <- DefaultAssay(seuratQCMergedCleaned)
@@ -1145,7 +1145,7 @@ DefaultAssay(seuratQCMergedCleaned) <- originalDefaultAssay.tmp
 rm_tmp(ask = FALSE)
 ```
 
-```{r FigureS1D}
+```{r FigureS3E}
 # Set up cluster info
 nClust <- length(table(seuratQCMergedCleaned@meta.data$seurat_clusters_DS))
 nClustString <- paste0("_", as.character(nClust), "Clusters")
@@ -1222,9 +1222,9 @@ rm_tmp(ask = FALSE)
 
 ## Figure 2
 
-```{r Figure2A, message=FALSE, warning=FALSE}
+```{r DGEHeatmapTregIARMinusCEFX_REMOVED, message=FALSE, warning=FALSE}
 # DGEHeatmapTregIARMinusCEFX
-# Manuscript Figure 2A
+
 fontSize <- 8
 
 # Genes to label
@@ -1340,9 +1340,9 @@ savePlot(
 rm_tmp(ask = FALSE)
 ```
 
-```{r Figure2B, message=FALSE, warning=FALSE}
+```{r DGEHeatmapTconvIARMinusCEFX_REMOVED, message=FALSE, warning=FALSE}
 # DGEHeatmapTconvIARMinusCEFX
-# Manuscript Figure 2B
+
 fontSize <- 8
 
 # Genes to label
@@ -1458,7 +1458,7 @@ savePlot(
 rm_tmp(ask = FALSE)
 ```
 
-```{r Figure2C}
+```{r StackedTregHallmarkGOCuratedTerms_REMOVED}
 # StackedTregHallmarkGOCuratedTerms
 # GO terms:
 #   Innate immune response: INNATE_IMMUNE_RESPONSE
@@ -1665,7 +1665,7 @@ savePlot(
 )
 ```
 
-```{r Figure2D}
+```{r StackedTconvHallmarkGOCuratedTerms_REMOVED}
 # StackedTconvHallmarkGOCuratedTerms
 # GO terms:
 #   Cytokine response: RESPONSE_TO_CYTOKINE
@@ -1877,7 +1877,7 @@ savePlot(
 ```
 
 # Figure S2
-```{r FigureS2_1}
+```{r DGEHeatmapsTregVsTconvIAR_REMOVED}
 # DGEHeatmapsTregVsTconvIAR
 # Manuscript Figure S2
 fontSize <- 8
@@ -1998,7 +1998,7 @@ savePlot(
 rm_tmp(ask = FALSE)
 ```
 
-```{r FigureS2_2}
+```{r DGEHeatmapsTregVsTconvMicrobial_REMOVED}
 # DGEHeatmapsTregVsTconvMicrobial
 fontSize <- 8
 nGenes <- 60
@@ -2118,7 +2118,7 @@ savePlot(
 rm_tmp(ask = FALSE)
 ```
 
-```{r FigureS2_3}
+```{r DGEHeatmapsTregVsTconvPolyclonal_REMOVED}
 # DGEHeatmapsTregVsTconvPolyclonal
 fontSize <- 8
 nGenes <- 60
@@ -2239,8 +2239,8 @@ rm_tmp(ask = FALSE)
 ```
 
 # Figure 3
-```{r Figure3ARight, cache = TRUE}
-# Manuscript Figure 3A (right)
+```{r TregClustersGeneExpressionDotplots_REMOVED, cache = TRUE}
+
 dotPlotDotSize <- 3.75
 
 # subset our seurat object down to just Treg cells
@@ -2296,7 +2296,7 @@ for (genesOfInterestCategory in colnames(geneListsTreg.df)) {
   savePlot(
     plot = dotPlot.tmp,
     plotDir = plotDir,
-    filename = paste0(nClustString, genesString, "_TregGenesDotPlotTregs"),
+    filename = paste0(nClustString, genesString, "TregGenesDotPlotTregs"),
     height = 4,
     width = 4.5,
     units = "in",
@@ -2306,8 +2306,8 @@ for (genesOfInterestCategory in colnames(geneListsTreg.df)) {
 }
 ```
 
-```{r Figure3BRight}
-# Manuscript Figure 3B (Right)
+```{r TconvClustersGeneExpressionDotplots_REMOVED}
+
 dotPlotDotSize <- 3.75
 
 # subset our seurat object down to just Tconv cells
@@ -2349,7 +2349,7 @@ for (genesOfInterestCategory in colnames(geneListsTconv.df)) {
   savePlot(
     plot = dotPlot.tmp,
     plotDir = plotDir,
-    filename = paste0(nClustString, genesString, "_TconvGenesDotPlotTconvs"),
+    filename = paste0(nClustString, genesString, "TconvGenesDotPlotTconvs"),
     height = 4,
     width = 4.5,
     units = "in",
@@ -2359,8 +2359,8 @@ for (genesOfInterestCategory in colnames(geneListsTconv.df)) {
 }
 ```
 
-```{r Figure3CRight}
-# Figure 3C (right)
+```{r FigureS4DRight}
+# Figure S4D (right)
 fontSize <- 8
 # Subset to Treg cells (adjust if needed)
 metadata_treg <- seuratQCMergedCleaned@meta.data %>%
@@ -2474,8 +2474,8 @@ savePlot(
 rm_tmp(ask = FALSE)
 ```
 
-```{r Figure3DRight}
-# Figure 3D (right)
+```{r FigureS4ERight}
+# Figure S4E (right)
 fontSize <- 8
 # Subset to Tconv cells (adjust if needed)
 metadata_Tconv <- seuratQCMergedCleaned@meta.data %>%
@@ -2589,8 +2589,8 @@ savePlot(
 rm_tmp(ask = FALSE)
 ```
 
-```{r Figure3ALeft}
-# Figure3A (left)
+```{r FigureS4A}
+# FigureS4A
 # RNA UMAP Tregs
 seurat.tmp <- subset(seuratAgSpecific, cellType == "Treg")
 
@@ -2610,7 +2610,7 @@ plot.tmp <- DimPlot(object = seurat.tmp,
 savePlot(
   plot = plot.tmp,
   plotDir = plotDir,
-  filename = paste0(nClustString, "_UMAP_RNA_TregOnly"),
+  filename = paste0(nClustString, "UMAP_RNA_TregOnly"),
   height = 6,
   width = 10,
   units = "in",
@@ -2619,13 +2619,13 @@ savePlot(
 )
 ```
 
-```{r Figure3BLeft}
-# Figure3B (left)
+```{r FigureS4B}
+# FigureS4B
 # RNA UMAP Tconvs
 seurat.tmp <- subset(seuratAgSpecific, cellType == "Tconv")
 
 nClust <- length(table(seurat.tmp@meta.data$seurat_clusters_Tconv))
-nClustString <- paste0("_", as.character(nClust), "Clusters")
+nClustString <- paste0("", as.character(nClust), "Clusters")
 
 set.seed(314)
 plot.tmp <- DimPlot(object = seurat.tmp,
@@ -2640,7 +2640,7 @@ plot.tmp <- DimPlot(object = seurat.tmp,
 savePlot(
   plot = plot.tmp,
   plotDir = plotDir,
-  filename = paste0(nClustString, "_UMAP_RNA_TconvOnly"),
+  filename = paste0(nClustString, "UMAP_RNA_TconvOnly"),
   height = 6,
   width = 10,
   units = "in",
@@ -2649,13 +2649,13 @@ savePlot(
 )
 ```
 
-```{r Figure3CLeft}
-# Figure 3C (left)
+```{r FigureS4DLeft}
+# Figure S4D (left)
 # RNA UMAP Tregs, stimulation
 seurat.tmp <- subset(seuratAgSpecific, cellType == "Treg")
 
 nClust <- length(table(seurat.tmp@meta.data$seurat_clusters_Treg))
-nClustString <- paste0("_", as.character(nClust), "Clusters")
+nClustString <- paste0("", as.character(nClust), "Clusters")
 
 set.seed(314)
 plot.tmp <- DimPlot(object = seurat.tmp,
@@ -2670,7 +2670,7 @@ plot.tmp <- DimPlot(object = seurat.tmp,
 savePlot(
   plot = plot.tmp,
   plotDir = plotDir,
-  filename = paste0(nClustString, "_UMAP_RNA_TregOnly_stimulation"),
+  filename = paste0(nClustString, "UMAP_RNA_TregOnly_stimulation"),
   height = 6,
   width = 10,
   units = "in",
@@ -2679,13 +2679,13 @@ savePlot(
 )
 ```
 
-```{r Figure3DLeft}
-# Figure 3D (left)
+```{r FigureS4ELeft}
+# Figure S4E (left)
 # RNA UMAP Tconvs, stimulation
 seurat.tmp <- subset(seuratAgSpecific, cellType == "Tconv")
 
 nClust <- length(table(seurat.tmp@meta.data$seurat_clusters_Tconv))
-nClustString <- paste0("_", as.character(nClust), "Clusters")
+nClustString <- paste0("", as.character(nClust), "Clusters")
 
 set.seed(314)
 plot.tmp <- DimPlot(object = seurat.tmp,
@@ -2700,7 +2700,7 @@ plot.tmp <- DimPlot(object = seurat.tmp,
 savePlot(
   plot = plot.tmp,
   plotDir = plotDir,
-  filename = paste0(nClustString, "_UMAP_RNA_TconvOnly_stimulation"),
+  filename = paste0(nClustString, "UMAP_RNA_TconvOnly_stimulation"),
   height = 6,
   width = 10,
   units = "in",
@@ -2713,7 +2713,7 @@ rm_tmp(ask = FALSE)
 
 ## Figure S3
 
-```{r FigureS3A}
+```{r ClusterDefiningGenesTregs_REMOVED}
 # cluster-defining genes, Tregs
 nGenes <- 10
 nGenesString <- as.character(nGenes)
@@ -2848,7 +2848,7 @@ dotPlot.tmp <- DotPlot(seurat.tmp, dot.scale = 3.75, features = genes.tmp, group
 savePlot(
   plot = dotPlot.tmp,
   plotDir = plotDir,
-  filename = paste0(nClustString, "_top", nGenesString, "ClusterDefiningGenesDotPlotTregs"),
+  filename = paste0(nClustString, "top", nGenesString, "ClusterDefiningGenesDotPlotTregs"),
   height = 4,
   width = 7,
   units = "in",
@@ -2859,7 +2859,7 @@ savePlot(
 rm_tmp(ask = FALSE)
 ```
 
-```{r FigureS3B}
+```{r TotalSeqExpressionOnTregUMAP_REMOVED}
 # TotalSeq/CITESeq expression on Treg UMAP
 # TotalSeq/CITESeq markers on UMAPs
 seurat.tmp <- subset(seuratAgSpecific, cellType == "Treg")
@@ -2896,7 +2896,7 @@ for (marker in markers) {
 rm_tmp(ask = FALSE)
 ```
 
-```{r FigureS3C}
+```{r ClusterDefiningGenesDotplotTconv_REMOVED}
 # cluster-defining genes, Tconvs
 nGenes <- 30
 nGenesString <- as.character(nGenes)
@@ -3042,7 +3042,7 @@ savePlot(
 rm_tmp(ask = FALSE)
 ```
 
-```{r FigureS3D}
+```{r TotalSeqExpressionOnTconvUMAPs_REMOVED}
 # TotalSeq/CITESeq expression on Treg UMAP
 # TotalSeq/CITESeq markers on UMAPs
 seurat.tmp <- subset(seuratAgSpecific, cellType == "Tconv")
@@ -3079,7 +3079,7 @@ for (marker in markers) {
 rm_tmp(ask = FALSE)
 ```
 
-```{r FigureS3E}
+```{r TregAndTconvUMAPsClusterColorStimulationFacet_REMOVED}
 # FigureS3E (Left)
 # RNA UMAP Tregs
 
@@ -3144,8 +3144,8 @@ savePlot(
 
 # Figure 5
 
-```{r Figure5A}
-# Figure 5A
+```{r FigureS6A}
+# Figure S6A Airline plots
 # make subset Seurat object
 seurat.tmp <- subset(seuratAgSpecific, subset = stimulationFigures == "IAR")
 
@@ -3236,7 +3236,8 @@ airlinePlot(seuratObj = seuratAgSpecific,
   minClones = 2)
 ```
 
-```{r Figure5B}
+```{r FigureS6B}
+# Figure S6B TCR sharing upset plots
 # TCR sharing upset plot
 fontsize <- 8
 
@@ -3332,8 +3333,8 @@ rm_tmp(ask = FALSE)
 
 # Figure S7
 
-```{r FigureS7A}
-# Figure S7A
+```{r TregAirlinePlots_REMOVED}
+
 # ---------------------Treg-only-----------------------------------------------------------
 # make subset Seurat object
 seurat.tmp <- subset(seuratAgSpecific, subset = cellType %in% c("Treg")) # limit to just the Treg cells
@@ -3408,8 +3409,8 @@ airlinePlot(seuratObj = seurat.tmp,
   minClones = 2)
 ```
 
-```{r FigureS7B}
-# Figure S7B
+```{r TconvAirlinePlots_REMOVED}
+
 # ---------------------Tconv-only-----------------------------------------------------------
 # make subset Seurat object
 seurat.tmp <- subset(seuratAgSpecific, subset = cellType %in% c("Tconv")) # limit to just the Tconv cells.
@@ -3488,7 +3489,7 @@ rm_tmp(ask = FALSE)
 gc()
 ```
 
-```{r FigureS7C}
+```{r expansionProportionPlotsTregsClusterFacetDonorCellsInStimDenom_noPolyclonal_REMOVED}
 # expansionProportionPlotsTregsClusterFacetDonorCellsInStimDenom_noPolyclonal
 # Create a temporary TCR dataframe so that we don't bother the original
 cleanTCRAgSpecificPairs.df.tmp <- cleanTCRAgSpecificPairs.df
@@ -3667,7 +3668,7 @@ savePlot(
 rm_tmp(ask = FALSE)
 ```
 
-```{r FigureS7D}
+```{r expansionProportionPlotsTconvsClusterFacetDonorCellsInStimDenom_noPolyclonal_REMOVED}
 # expansionProportionPlotsTconvsClusterFacetDonorCellsInStimDenom_noPolyclonal
 # Create a temporary TCR dataframe so that we don't bother the original
 cleanTCRAgSpecificPairs.df.tmp <- cleanTCRAgSpecificPairs.df
@@ -4285,6 +4286,7 @@ cat("Change in significance:",
       "No change in significance")), "\n")
 
 # Show convergence plot data (first and last 10 iterations)
+iteration_results <- main_results$iteration_results
 if (nrow(iteration_results) > 20) {
   cat("\n=== Convergence Summary (Downsampled Rates) ===\n")
   cat("First 10 iterations:\n")
@@ -4742,106 +4744,6 @@ for (k in 1:length(comparison_names)) {
 
 ```{r TconvAndTregProportionExactTests}
 # ============================================Tregs Exact tests===============================================================
-cat("Target: Stable expansion rates (±", convergence_tolerance, "%) over", convergence_window, "iterations\n\n")
-
-while (!converged && iteration < max_iterations) {
-  iteration <- iteration + 1
-  set.seed(iteration + 242)  # Different seed base for Tconv analysis
-
-  # Downsample Microbial Tconvs to target size
-  microbial_tconv_data <- tconv_tcr_data %>%
-    filter(stimulationFigures == "Microbial")
-
-  if (nrow(microbial_tconv_data) > target_sample_size_tconv) {
-    microbial_tconv_downsampled <- microbial_tconv_data %>%
-      slice_sample(n = target_sample_size_tconv)
-  } else {
-    microbial_tconv_downsampled <- microbial_tconv_data
-  }
-
-  # Downsample Polyclonal Tconvs to target size
-  polyclonal_tconv_data <- tconv_tcr_data %>%
-    filter(stimulationFigures == "Polyclonal")
-
-  if (nrow(polyclonal_tconv_data) > target_sample_size_tconv) {
-    polyclonal_tconv_downsampled <- polyclonal_tconv_data %>%
-      slice_sample(n = target_sample_size_tconv)
-  } else {
-    polyclonal_tconv_downsampled <- polyclonal_tconv_data
-  }
-
-  # Combine downsampled groups with full IAR
-  downsampled_tconv_data <- bind_rows(
-    microbial_tconv_downsampled,
-    polyclonal_tconv_downsampled,
-    tconv_tcr_data %>% filter(stimulationFigures == "IAR")
-  )
-
-  # Calculate expansion for downsampled data
-  downsampled_tconv_expansion <- downsampled_tconv_data %>%
-    group_by(stimulationFigures) %>%
-    group_modify(~ {
-      .x %>%
-        mutate(expanded = ifelse(fullLengthNT %in% fullLengthNT[duplicated(fullLengthNT)], 1, 0))
-    }) %>%
-    summarise(
-      total_pairs = n(),
-      expanded_pairs = sum(expanded),
-      expansion_rate = expanded_pairs / total_pairs,
-      .groups = "drop"
-    )
-
-  # Get expansion rates for convergence tracking
-  microbial_tconv_rate <- downsampled_tconv_expansion$expansion_rate[downsampled_tconv_expansion$stimulationFigures == "Microbial"] * 100
-  polyclonal_tconv_rate <- downsampled_tconv_expansion$expansion_rate[downsampled_tconv_expansion$stimulationFigures == "Polyclonal"] * 100
-
-  # Store results
-  iteration_results_tconv <- rbind(iteration_results_tconv, data.frame(
-    iteration = iteration,
-    microbial_rate = microbial_tconv_rate,
-    iar_rate = downsampled_tconv_expansion$expansion_rate[downsampled_tconv_expansion$stimulationFigures == "IAR"] * 100,
-    polyclonal_rate = polyclonal_tconv_rate
-  ))
-
-  # Check for convergence
-  if (iteration >= convergence_window) {
-    recent_microbial_rates <- tail(iteration_results_tconv$microbial_rate, convergence_window)
-    recent_polyclonal_rates <- tail(iteration_results_tconv$polyclonal_rate, convergence_window)
-
-    microbial_range <- max(recent_microbial_rates) - min(recent_microbial_rates)
-    polyclonal_range <- max(recent_polyclonal_rates) - min(recent_polyclonal_rates)
-
-    if (microbial_range <= convergence_tolerance && polyclonal_range <= convergence_tolerance) {
-      converged <- TRUE
-      cat("✓ TCONV CONVERGED at iteration", iteration, "\n")
-      cat("  Microbial expansion rate stable at:", round(mean(recent_microbial_rates), 1), "% (±", round(microbial_range, 1), "%)\n")
-      cat("  Polyclonal expansion rate stable at:", round(mean(recent_polyclonal_rates), 1), "% (±", round(polyclonal_range, 1), "%)\n")
-    }
-  }
-
-  # Print progress every 50 iterations
-  if (iteration %% 50 == 0 || converged) {
-    cat("Tconv Iteration", iteration, "- Microbial:", round(microbial_tconv_rate, 1), "%, Polyclonal:", round(polyclonal_tconv_rate, 1), "%\n")
-  }
-}
-
-if (!converged) {
-  cat("⚠ Tconv analysis did not converge after", max_iterations, "iterations\n")
-}
-
-# Final Tconv results - using cumulative averages
-final_microbial_tconv_rate <- mean(microbial_tconv_rates)
-final_polyclonal_tconv_rate <- mean(polyclonal_tconv_rates)
-
-cat("\n=== Final Tconv Downsampled Results (Cumulative Averages) ===\n")
-cat("Iterations run:", iteration, "\n")
-cat("Final rates by stimulation:\n")
-cat("  Microbial:", round(final_microbial_tconv_rate, 1), "%\n")
-cat("  IAR:", round(tconv_iar_expansion_rate, 1), "% (unchanged)\n")
-cat("  Polyclonal:", round(final_polyclonal_tconv_rate, 1), "%\n")
-
-
-# ============================================Tregs Exact tests===============================================================
 # Re-calculate expansion status within each stimulation for Treg TCR pairs
 treg_tcr_data <- cleanTCRAgSpecificPairs.df %>%
   dplyr::filter(cellType == "Treg")
@@ -5044,7 +4946,9 @@ gc()
 # New figure variants (added 2026-05)
 
 ## Combined Treg + Tconv curated stair-step dotplot
-```{r combinedTregTconv_curated_dotplot_stairstep}
+```{r FigureS4C}
+# FigureS4C
+
 # Combined Treg + Tconv dotplot of the curated gene lists, rows = cluster
 # labels like "0_Treg", "1_Tconv", single shared color scale, genes ordered
 # diagonally (stair-step) by peak-expression cluster.
@@ -5107,7 +5011,7 @@ rm_tmp(ask = FALSE)
 ```
 
 ## Curated dotplot grouped by gene category (combined, Treg-only, Tconv-only)
-```{r combinedTregTconv_curated_grouped_dotplot}
+```{r TregTconv_curated_grouped_dotplot_REMOVED}
 # Like the stair-step dotplot above, but genes are grouped into functional
 # categories (Activation / Naive / Memory / Treg / Th subsets / Function) per
 # the curated layout (image005). Category membership + within-category order are
@@ -5222,7 +5126,7 @@ rm_tmp(ask = FALSE)
 ```
 
 ## Treg signatures (Hollbacher, Cheng SBT_Identity_Treg)
-```{r tregSignatures_load_and_subset}
+```{r tregSignatures_load_and_subset_REMOVED}
 # Load published Treg signatures and build the Treg+Tconv subset / combined
 # cluster identity used by all three signature display chunks below.
 
@@ -5262,7 +5166,7 @@ signatureGeneSets <- list(
 )
 ```
 
-```{r tregSignatures_perGene_heatmap}
+```{r tregSignatures_perGene_heatmap_REMOVED}
 # Per-gene z-score heatmap per signature, aggregated by donorId x
 # clusterCellType (matches Fig S2 aggregation, but with cluster_cellType
 # instead of donor_cellType columns).
@@ -5366,7 +5270,7 @@ for (sigName in names(signatureGeneSets)) {
 rm_tmp(ask = FALSE)
 ```
 
-```{r tregSignatures_perGene_bubbleplot}
+```{r tregSignatures_perGene_bubbleplot_REMOVED}
 # Per-gene stair-step DotPlot per signature, grouped by clusterCellType.
 dotPlotDotSize <- 3.75
 
@@ -5417,7 +5321,7 @@ for (sigName in names(signatureGeneSets)) {
 rm_tmp(ask = FALSE)
 ```
 
-```{r tregSignatures_moduleScore_summary}
+```{r tregSignatures_moduleScore_summary_REMOVED}
 # Per-cell module score (AddModuleScore) for each signature, plotted as
 # boxplot+jitter by clusterCellType, faceted by signature.
 
@@ -5479,7 +5383,7 @@ rm_tmp(ask = FALSE)
 ```
 
 ## Treg signatures, per-stimulation variants
-```{r tregSignatures_perStimulation_variants}
+```{r tregSignatures_perStimulation_variants_REMOVED}
 # Stimulation-specific versions of the three signature displays above
 # (per-gene heatmap, per-gene stair-step bubbleplot, module-score boxplot).
 # For each stimulation we subset the Treg+Tconv object, rebuild the combined
@@ -5633,7 +5537,7 @@ gc()
 ```
 
 ## Combined Hollbacher + Cheng dotplot, signature source annotated
-```{r tregSignatures_combined_sourceAnnotated_dotplot}
+```{r tregSignatures_combined_sourceAnnotated_dotplot_REMOVED}
 # One dotplot showing the UNION of the Hollbacher and Cheng Treg signatures, with
 # each gene annotated by its source (Hollbacher / Cheng / Both) - styled after the
 # colleague's combined plot. Source is encoded by the color of the gene (x-axis)
@@ -5771,7 +5675,8 @@ tcrStats_downsmp <- subsampledTcrStatsByChain(
 ```
 
 ## Tconv vs Treg NT-expansion proportion per donor (TRA / TRB / pair)
-```{r expandedNT_TregVsTconv_compute_and_plot}
+```{r FigureS6C}
+# Figure S6C
 # Tconv vs Treg "expansion proportion" = proportion of cells whose chain
 # sequence is shared (appears >= 2x) per donor, across IAR / Microbial /
 # Polyclonal, for the TRA, TRB and alpha-beta pair chains. Quantity + subsampling
@@ -5930,7 +5835,7 @@ gc()
 ```
 
 ## Inverse Simpson's TCR diversity, Treg vs Tconv (per chain)
-```{r inverseSimpson_TregVsTconv_compute_and_plot}
+```{r inverseSimpson_TregVsTconv_compute_and_plot_REMOVED}
 # Inverse Simpson's diversity (1 / sum p_i^2) of NT-level TCR clones, Tconv vs
 # Treg per donor, faceted by chain (TRA | TRB), colored by study group (HC / T1D)
 # - the image004 panel. Uses the SAME shared subsamples as the expansion figures

@@ -2471,6 +2471,35 @@ savePlot(
   formats = c("pdf", "png") # or "pdf", "png", or c("pdf", "png")
 )
 
+# --- Export plotted source data (Figure S4D, right) ---
+# prop_df holds exactly what is plotted: per donor x stimulation x cluster, the
+# percentage of that donor's Treg cells (within a stimulation) falling in each
+# cluster. studyGroup is a per-donor attribute, so attach it via a donor lookup.
+sourceDataDir <- file.path(dataOutputDir, "figureSourceData")
+dir.create(sourceDataDir, showWarnings = FALSE, recursive = TRUE)
+
+donorLookup <- metadata_treg %>%
+  dplyr::distinct(donorIdFigures, donorId, studyGroup)
+
+sourceData_S4D <- prop_df %>%
+  dplyr::left_join(donorLookup, by = "donorIdFigures") %>%
+  dplyr::transmute(
+    donorId,
+    studyGroup,
+    stimulation       = stimulationFigures,
+    cluster           = seurat_clusters_Treg,
+    nCells            = count,
+    nCellsDonorStim   = total,
+    percentWithinStim = percentage
+  ) %>%
+  dplyr::arrange(cluster, stimulation, studyGroup, donorId)
+
+write.csv(
+  sourceData_S4D,
+  file.path(sourceDataDir, "FigureS4D_right_TregClusterBreakdown_PerStim_Percent.csv"),
+  row.names = FALSE
+)
+
 rm_tmp(ask = FALSE)
 ```
 
@@ -2584,6 +2613,35 @@ savePlot(
   units = "in",
   dpi = 600,
   formats = c("pdf", "png") # or "pdf", "png", or c("pdf", "png")
+)
+
+# --- Export plotted source data (Figure S4E, right) ---
+# prop_df holds exactly what is plotted: per donor x stimulation x cluster, the
+# percentage of that donor's Tconv cells (within a stimulation) falling in each
+# cluster. studyGroup is a per-donor attribute, so attach it via a donor lookup.
+sourceDataDir <- file.path(dataOutputDir, "figureSourceData")
+dir.create(sourceDataDir, showWarnings = FALSE, recursive = TRUE)
+
+donorLookup <- metadata_Tconv %>%
+  dplyr::distinct(donorIdFigures, donorId, studyGroup)
+
+sourceData_S4E <- prop_df %>%
+  dplyr::left_join(donorLookup, by = "donorIdFigures") %>%
+  dplyr::transmute(
+    donorId,
+    studyGroup,
+    stimulation       = stimulationFigures,
+    cluster           = seurat_clusters_Tconv,
+    nCells            = count,
+    nCellsDonorStim   = total,
+    percentWithinStim = percentage
+  ) %>%
+  dplyr::arrange(cluster, stimulation, studyGroup, donorId)
+
+write.csv(
+  sourceData_S4E,
+  file.path(sourceDataDir, "FigureS4E_right_TconvClusterBreakdown_PerStim_Percent.csv"),
+  row.names = FALSE
 )
 
 rm_tmp(ask = FALSE)
@@ -5705,9 +5763,36 @@ chain_levels <- c("TRA", "TRB", "pair")
 # Plot helper: x = cellType, facet stim x studyGroup. padjInHeader places "Padj"
 # in the colored HC/T1D column header (per-stim figures); otherwise it is
 # annotated on each panel (3-stim grid, whose shared headers can't carry it).
+filterExpansionStim <- function(df, stimsToShow) {
+  df %>% dplyr::filter(stimulationFigures %in% stimsToShow)
+}
+
+# donorIdFigures -> plain donorId lookup (donorIdFigures is the sanitized
+# display id used for figure grouping/coloring, not a real identifier).
+donorLookup_expansion <- seuratAgSpecific@meta.data %>%
+  dplyr::distinct(donorIdFigures, donorId)
+
+# Exact per-donor data underlying the boxplot/line/point geoms for one panel
+# set (i.e. what filterExpansionStim() hands to make_expansion_plot()).
+exportExpansionSourceData <- function(df_sub, filePath) {
+  sourceData <- df_sub %>%
+    dplyr::left_join(donorLookup_expansion, by = "donorIdFigures") %>%
+    dplyr::transmute(
+      donorId,
+      studyGroup,
+      stimulation = stimulationFigures,
+      chain,
+      cellType,
+      nCells = n_cells,
+      propExpandedNT
+    ) %>%
+    dplyr::arrange(chain, stimulation, studyGroup, cellType, donorId)
+  write.csv(sourceData, filePath, row.names = FALSE)
+}
+
 make_expansion_plot <- function(df, stats, stimsToShow, padjInHeader = FALSE) {
-  df_sub    <- df    %>% dplyr::filter(stimulationFigures %in% stimsToShow)
-  stats_sub <- stats %>% dplyr::filter(stimulationFigures %in% stimsToShow)
+  df_sub    <- filterExpansionStim(df, stimsToShow)
+  stats_sub <- filterExpansionStim(stats, stimsToShow)
 
   rowStripLevels <- intersect(levels(df_sub$stimulationFigures), stimsToShow)
   colStripLevels <- intersect(studyGroup_levels,
@@ -5771,6 +5856,9 @@ make_expansion_plot <- function(df, stats, stimsToShow, padjInHeader = FALSE) {
   p
 }
 
+sourceDataDir <- file.path(dataOutputDir, "figureSourceData")
+dir.create(sourceDataDir, showWarnings = FALSE, recursive = TRUE)
+
 variants <- list(nodownsample = tcrStats_nodown, downsampled = tcrStats_downsmp)
 for (variantTag in names(variants)) {
   statsAll <- variants[[variantTag]] %>%
@@ -5811,20 +5899,30 @@ for (variantTag in names(variants)) {
     stats_ch <- test_results %>% dplyr::filter(chain == ch)
 
     # 3-stim faceted figure (padj annotated on panels)
+    facetedFilename <- paste0("expandedNT_TregVsTconv_", ch, "_faceted_", variantTag)
     savePlot(
       plot = make_expansion_plot(df_ch, stats_ch, stim_levels, padjInHeader = FALSE),
       plotDir = plotDir,
-      filename = paste0("expandedNT_TregVsTconv_", ch, "_faceted_", variantTag),
+      filename = facetedFilename,
       height = 7, width = 5.5, units = "in", dpi = 600, formats = c("pdf", "png")
+    )
+    exportExpansionSourceData(
+      filterExpansionStim(df_ch, stim_levels),
+      file.path(sourceDataDir, paste0("FigureS6C_", facetedFilename, ".csv"))
     )
 
     # Per-stimulation figures (Padj in HC/T1D header)
     for (stim in stim_levels) {
+      stimFilename <- paste0("expandedNT_TregVsTconv_", ch, "_", stim, "_", variantTag)
       savePlot(
         plot = make_expansion_plot(df_ch, stats_ch, stim, padjInHeader = TRUE),
         plotDir = plotDir,
-        filename = paste0("expandedNT_TregVsTconv_", ch, "_", stim, "_", variantTag),
+        filename = stimFilename,
         height = 3.5, width = 4, units = "in", dpi = 600, formats = c("pdf", "png")
+      )
+      exportExpansionSourceData(
+        filterExpansionStim(df_ch, stim),
+        file.path(sourceDataDir, paste0("FigureS6C_", stimFilename, ".csv"))
       )
     }
   }
